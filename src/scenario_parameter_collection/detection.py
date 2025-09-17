@@ -78,9 +78,11 @@ class HighDScenarioDetector:
         self._validate_columns(tracks)
         prepared = self._prepare_dataframe(tracks)
         events: List[ScenarioEvent] = []
-        for track_id, track_df in prepared.groupby("id"):
+        group_columns = self._groupby_columns(prepared)
+        for _, track_df in prepared.groupby(group_columns, sort=False):
             sorted_track = track_df.sort_values("frame").reset_index(drop=True)
-            events.extend(self._detect_for_track(track_id=int(track_id), track=sorted_track))
+            track_id = int(track_df["id"].iloc[0])
+            events.extend(self._detect_for_track(track_id=track_id, track=sorted_track))
         return events
 
     # ------------------------------------------------------------------
@@ -89,6 +91,16 @@ class HighDScenarioDetector:
         missing = [col for col in self.required_columns if col not in tracks.columns]
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
+
+    def _groupby_columns(self, df: pd.DataFrame) -> List[str]:
+        """Return the dataframe columns used to isolate individual tracks."""
+
+        discriminators = [
+            column for column in ("recording_id", "source_file") if column in df.columns
+        ]
+        if discriminators:
+            return discriminators + ["id"]
+        return ["id"]
 
     def _prepare_dataframe(self, tracks: pd.DataFrame) -> pd.DataFrame:
         df = tracks.copy()
@@ -113,12 +125,25 @@ class HighDScenarioDetector:
             "xAcceleration": "preceding_xAcceleration",
             "yVelocity": "preceding_yVelocity",
         }
+        discriminator_cols = [
+            column for column in ("recording_id", "source_file") if column in df.columns
+        ]
+        join_keys = ["precedingId", "frame", *discriminator_cols]
         lead_info = (
-            df[["id", "frame", "xVelocity", "xAcceleration", "yVelocity"]]
+            df[
+                [
+                    "id",
+                    "frame",
+                    *discriminator_cols,
+                    "xVelocity",
+                    "xAcceleration",
+                    "yVelocity",
+                ]
+            ]
             .rename(columns=lead_cols)
-            .drop_duplicates(subset=["precedingId", "frame"], keep="last")
+            .drop_duplicates(subset=join_keys, keep="last")
         )
-        df = df.merge(lead_info, on=["precedingId", "frame"], how="left")
+        df = df.merge(lead_info, on=join_keys, how="left")
         df["relative_speed"] = df["xVelocity"] - df["preceding_xVelocity"]
         df["relative_acceleration"] = df["xAcceleration"] - df["preceding_xAcceleration"]
         return df
