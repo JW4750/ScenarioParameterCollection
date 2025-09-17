@@ -1,88 +1,76 @@
-项目概述
-本项目基于HighD数据集（德国高速公路自然驾驶数据），实现自动识别典型的行驶场景，如跟车、前车制动、切入/切出、变道等。项目包括：
+# Scenario Parameter Collection
 
-文献调研文档：总结高速公路行驶过程中可能遇到的功能场景、关键参数及其阈值范围。基于现有文献（如ISO 21448、arXiv论文）和GitHub项目（如TrafficScenarios-RFAPsClustering）。
-Python实现：一个脚本，用于处理HighD的tracks.csv文件，识别场景、统计发生频率，并计算每个场景关键参数的概率分布函数（使用KDE拟合）。输出包括控制台打印和可视化图表。
+本项目提供基于 HighD 数据集的高速公路功能场景自动识别与参数统计工具，包括：
 
-该项目适用于自动驾驶系统（ADS）验证、场景提取和风险分析。HighD数据集需自行下载（从levelxdata.com获取）。
-功能场景列表
-项目调研了10类高速公路功能场景（扩展自HighD提取的7类）。详细描述见调研文档。
+- **文献调研文档**：`docs/scenario_catalog.md` 汇总高速公路典型场景及关键参数。
+- **Python 库**：`scenario_parameter_collection`，支持从 HighD `*_tracks.csv` 数据自动识别场景，统计发生频率，并计算关键参数的概率分布（KDE）。
+- **命令行工具**：`python -m scenario_parameter_collection.cli`，批量处理 CSV 文件并输出统计结果。
 
-Car Following (跟车)
-Lead Vehicle Braking (前车制动)
-Cut-In from Left (从左侧切入)
-Cut-In from Right (从右侧切入)
-Cut-Out to Left (切出至左侧)
-Cut-Out to Right (切出至右侧)
-Ego Left Lane Change (ego左侧变道)
-Ego Right Lane Change (ego右侧变道)
-Merging (汇入)
-Overtaking (超车)
+## 功能特性
 
-每个场景定义了关键参数（如dhw、thw、ttc、xAcc等），并提供示例阈值。
-安装与依赖
-要求
+- 支持识别 12 类高速公路场景：自由巡航、稳定跟车、前车/自车制动、切入/切出、变道、拥堵跟驰、接近静止目标等。
+- 自动补充前车的速度与加速度信息，基于规则的事件检测算法。
+- 统计每类场景的发生频率以及关键参数的概率密度函数（Gaussian KDE）。
+- 将事件明细、频率统计、分布估计导出为 CSV/JSON，便于后续分析与可视化。
 
-Python 3.8+
-HighD数据集（tracks.csv文件）
+## 安装
 
-依赖库
-安装以下库：
-textpip install pandas numpy scipy matplotlib
-使用方法
+```bash
+pip install -e .[dev]
+```
 
-下载HighD数据集：从HighD官网下载所需的tracks.csv文件（例如，00_tracks.csv），放置在data/目录下。
-运行脚本：
+依赖：Python ≥ 3.9、NumPy、Pandas、SciPy、PyTest（开发/测试）。
 
-修改脚本中的file_path为你的CSV文件路径。
-执行：
-textpython highd_scenario_analysis.py
+## 使用示例
 
+1. **准备数据**：从 [https://www.highd-dataset.com/](https://www.highd-dataset.com/) 下载一个或多个 `*_tracks.csv` 文件，放置在 `data/` 目录。
+2. **命令行执行**：
 
+```bash
+python -m scenario_parameter_collection.cli --tracks data/ --output-dir outputs
+```
 
-输出：
+默认帧率为 25 Hz，可使用 `--frame-rate` 指定其他值。运行结束后将生成：
 
-场景发生频率（基于起始事件计数）。
-每个场景关键参数的均值、标准差。
-可视化图表（保存为highd_stats.png）：频率柱状图和参数分布KDE曲线。
-示例输出：
-textFrequencies:
-car_following            1234
-lead_vehicle_braking     567
-...
-car_following thw: mean=1.85, std=0.45
+- `outputs/scenario_events.csv`：每个识别事件的起止帧及关键参数。
+- `outputs/scenario_counts.csv`：各类场景发生次数。
+- `outputs/parameter_distributions.json`：每个场景关键参数的概率密度函数（KDE 采样网格与概率值）。
 
+3. **生成可视化报告**：
 
+```bash
+python -m scenario_parameter_collection.visualization --outputs outputs --html outputs/report.html
+```
 
+该命令会读取上一步生成的三个结果文件，自动构建包含以下内容的交互式 HTML 页面（Windows Edge 可直接打开）：
 
-代码结构
+- 场景发生频率柱状图及明细表格；
+- 各类场景关键参数的概率密度曲线；
+- 事件样例表（默认展示前 20 条）。
 
-load_highd_tracks(file_path): 加载并预处理CSV数据。
-identify_scenarios(df): 基于规则（如ID变化、阈值）识别场景，添加'scenario'列。
-compute_statistics(df): 计算频率和参数分布（KDE）。
-plot_statistics(counts, dists): 绘图和打印结果。
+## Python API
 
-示例代码片段
-pythonif __name__ == "__main__":
-    file_path = "data/00_tracks.csv"  # 替换为你的文件路径
-    df = load_highd_tracks(file_path)
-    df_scen = identify_scenarios(df)
-    counts, dists = compute_statistics(df_scen)
-    plot_statistics(counts, dists)
+```python
+from scenario_parameter_collection.highd_loader import load_tracks
+from scenario_parameter_collection.detection import HighDScenarioDetector
+from scenario_parameter_collection.statistics import estimate_parameter_distributions
 
-调研文档
-调研基于文献（如ISO 21448 SOTIF、HighD论文）和GitHub项目（如TrafficScenarios-RFAPsClustering、MetaScenario）。聚焦高速公路场景，排除城市元素。
-功能场景表格
+tracks = load_tracks("data/01_tracks.csv")
+detector = HighDScenarioDetector(frame_rate=25.0)
+events = detector.detect(tracks)
+stats = estimate_parameter_distributions(events)
 
-调研总结
-文献：场景提取常用聚类或规则-based方法。
-Git项目：提供提取框架。
-局限：场景重叠需处理。
+print(stats.counts)
+```
 
-局限与改进
-识别规则简化，可能需调阈值。
-未处理preceding车辆的精确轨迹（可扩展join操作）。
-未来：整合更多数据集（如NGSIM），添加天气因素。
+更多场景定义及参数说明见 `docs/scenario_catalog.md`。
 
-许可证
-MIT License. 详见LICENSE文件。
+## 测试
+
+```bash
+pytest
+```
+
+## 许可证
+
+MIT License，详见 `LICENSE`。
