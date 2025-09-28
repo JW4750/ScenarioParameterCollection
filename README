@@ -35,6 +35,7 @@ python -m scenario_parameter_collection.cli --tracks data/ --output-dir outputs
 - `outputs/scenario_events.csv`：每个识别事件的起止帧及关键参数。
 - `outputs/scenario_counts.csv`：各类场景发生次数。
 - `outputs/parameter_distributions.json`：每个场景关键参数的概率密度函数（KDE 采样网格与概率值）。
+
 - `outputs/erwin_coverage.csv`：Erwin de Gelder 10 大功能场景的覆盖统计（含描述与计数）。
 - `outputs/erwin_coverage_summary.json`：覆盖率汇总（总事件数、已覆盖事件数、覆盖比、未覆盖事件数）。
 - `outputs/unmapped_events.csv`：未能映射到 Erwin 场景的事件明细（场景名称、时间、车道 ID 等）。
@@ -75,5 +76,6 @@ pytest
 ```
 
 ## 许可证
+
 
 MIT License，详见 `LICENSE`。

@@ -10,7 +10,9 @@ from typing import Iterable
 import pandas as pd
 
 from .catalog import SCENARIO_DEFINITIONS
+
 from .coverage import ERWIN_SCENARIOS, compute_erwin_coverage
+
 from .detection import HighDScenarioDetector
 from .highd_loader import load_tracks
 from .statistics import estimate_parameter_distributions
@@ -49,11 +51,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+
 def write_outputs(output_dir: Path, stats, coverage) -> None:
+
     output_dir.mkdir(parents=True, exist_ok=True)
     events_path = output_dir / "scenario_events.csv"
     counts_path = output_dir / "scenario_counts.csv"
     distributions_path = output_dir / "parameter_distributions.json"
+
     erwin_counts_path = output_dir / "erwin_coverage.csv"
     erwin_summary_path = output_dir / "erwin_coverage_summary.json"
     unmatched_path = output_dir / "unmapped_events.csv"
@@ -65,6 +70,7 @@ def write_outputs(output_dir: Path, stats, coverage) -> None:
     counts_df.to_csv(counts_path, index=False)
     with distributions_path.open("w", encoding="utf-8") as fp:
         json.dump(stats.to_dict()["parameter_distributions"], fp, indent=2, ensure_ascii=False)
+
 
     erwin_counts = coverage.to_counts_dict()
     erwin_rows = [
@@ -110,6 +116,7 @@ def write_outputs(output_dir: Path, stats, coverage) -> None:
     ).to_csv(unmatched_path, index=False)
 
 
+
 def main(argv: Iterable[str] | None = None) -> None:
     parser = build_argument_parser()
     args = parser.parse_args(argv)
@@ -123,7 +130,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         bandwidth=args.bandwidth,
         grid_size=args.grid_size,
     )
+
     coverage = compute_erwin_coverage(events, frame_rate=args.frame_rate)
+
 
     if not stats.counts:
         print("No scenarios detected.")
@@ -132,6 +141,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     print("Scenario frequencies:")
     for scenario, count in sorted(stats.counts.items(), key=lambda item: item[0]):
         print(f"  {scenario}: {count}")
+
 
     print(
         "Erwin coverage: "
@@ -146,6 +156,7 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     output_dir = Path(args.output_dir)
     write_outputs(output_dir, stats, coverage)
+
     print(f"Results written to {output_dir.resolve()}")
 
 

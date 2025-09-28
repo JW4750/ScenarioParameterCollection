@@ -14,8 +14,10 @@ requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.23",
     "pandas>=1.5",
+
     "scipy>=1.10",
     "plotly>=5.15"
+
 ]
 
 [project.optional-dependencies]
@@ -23,9 +25,11 @@ dev = [
     "pytest>=7.0"
 ]
 
+
 [project.scripts]
 scenario-parameter-collection = "scenario_parameter_collection.cli:main"
 scenario-parameter-report = "scenario_parameter_collection.visualization:main"
+
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,3 +1,4 @@
+
 """Integration tests for HighD scenario detection and statistics."""
 
 from __future__ import annotations
@@ -5,10 +6,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+
 import pytest
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
+
 pytest.importorskip("plotly")
 
 from scenario_parameter_collection import statistics as stats_module
@@ -22,6 +25,7 @@ from scenario_parameter_collection.visualization import generate_report
 
 def make_synthetic_tracks() -> pd.DataFrame:
     """Build a compact set of tracks triggering multiple scenarios."""
+
 
     frames = np.arange(0, 50)
     base_columns = {
@@ -85,6 +89,7 @@ def make_synthetic_tracks() -> pd.DataFrame:
     ]
 
 
+
 def to_highd_tracks(df: pd.DataFrame) -> pd.DataFrame:
     """Add HighD specific columns so the CSV looks like the real dataset."""
 
@@ -133,6 +138,7 @@ def write_highd_csv(tmp_path: Path) -> Path:
     return file_path
 
 
+
 def test_detector_finds_car_following_and_lane_change():
     tracks = make_synthetic_tracks()
     detector = HighDScenarioDetector(frame_rate=25.0)
@@ -144,6 +150,7 @@ def test_detector_finds_car_following_and_lane_change():
     stats = estimate_parameter_distributions(events)
     assert stats.counts["car_following"] >= 1
     assert "mean_thw" in stats.parameter_distributions["car_following"]
+
 
     coverage = compute_erwin_coverage(events, frame_rate=25.0)
     assert coverage.total_events == len(events)
@@ -268,3 +275,4 @@ def test_visualization_report_creation(tmp_path: Path, monkeypatch):
     assert "Synthetic Report" in html
     assert "Scenario Frequency Overview" in html
     assert "car_following" in html
+
