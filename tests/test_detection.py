@@ -275,4 +275,3 @@ def test_visualization_report_creation(tmp_path: Path, monkeypatch):
     assert "Synthetic Report" in html
     assert "Scenario Frequency Overview" in html
     assert "car_following" in html
-

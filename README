@@ -6,11 +6,17 @@
 - **Python 库**：`scenario_parameter_collection`，支持从 HighD `*_tracks.csv` 数据自动识别场景，统计发生频率，并计算关键参数的概率分布（KDE）。
 - **命令行工具**：`python -m scenario_parameter_collection.cli`，批量处理 CSV 文件并输出统计结果。
 
+- **收敛分析 CLI**：`scenario-convergence-analysis`，按录入顺序逐步引入 HighD 片段并评估场景频率、参数分布的收敛情况。
+
+
 ## 功能特性
 
 - 支持识别 12 类高速公路场景：自由巡航、稳定跟车、前车/自车制动、切入/切出、变道、拥堵跟驰、接近静止目标等。
 - 自动补充前车的速度与加速度信息，基于规则的事件检测算法。
 - 统计每类场景的发生频率以及关键参数的概率密度函数（Gaussian KDE）。
+
+- 支持计算逐步引入 HighD 录制片段时的 MISE、对称 KL 散度、Hellinger 距离，评估何时达到稳定分布。
+
 - 将事件明细、频率统计、分布估计导出为 CSV/JSON，便于后续分析与可视化。
 
 ## 安装
@@ -52,6 +58,18 @@ python -m scenario_parameter_collection.visualization --outputs outputs --html o
 - 各类场景关键参数的概率密度曲线；
 - 事件样例表（默认展示前 20 条）。
 
+4. **收敛性评估**：
+
+```bash
+scenario-convergence-analysis --tracks data --output-dir outputs/convergence
+```
+
+默认阈值来源于 `docs/convergence_methodology.md`：MISE ≤ 2×10⁻³、对称 KL ≤ 5×10⁻³、Hellinger ≤ 5×10⁻²。命令会在输出目录下生成：
+
+- `convergence_steps.csv`：每次纳入新片段后的场景总数、频率分布变化、参数分布最大变化；
+- `parameter_shifts.csv`：逐场景逐参数的三项距离指标；
+- `convergence_summary.json`：整体阈值、是否收敛以及最终的场景频率。
+
 ## Python API
 
 ```python
@@ -67,7 +85,8 @@ stats = estimate_parameter_distributions(events)
 print(stats.counts)
 ```
 
-更多场景定义及参数说明见 `docs/scenario_catalog.md`；Erwin de Gelder 场景覆盖映射与调研见 `docs/erwin_scenario_mapping.md`。
+更多场景定义及参数说明见 `docs/scenario_catalog.md`；Erwin de Gelder 场景覆盖映射与调研见 `docs/erwin_scenario_mapping.md`；收敛评价文献综述与阈值依据见 `docs/convergence_methodology.md`。
+
 
 ## 测试
 

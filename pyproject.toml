@@ -29,7 +29,11 @@ dev = [
 [project.scripts]
 scenario-parameter-collection = "scenario_parameter_collection.cli:main"
 scenario-parameter-report = "scenario_parameter_collection.visualization:main"
-
+scenario-convergence-analysis = "scenario_parameter_collection.convergence_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+

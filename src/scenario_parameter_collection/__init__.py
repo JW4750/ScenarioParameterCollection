@@ -10,6 +10,12 @@ from .coverage import (
     compute_erwin_coverage,
 )
 
+from .convergence import (
+    ConvergenceSummary,
+    DistanceTriple,
+    ScenarioConvergenceAnalyzer,
+)
+
 from .detection import HighDScenarioDetector, ScenarioEvent
 from .statistics import ScenarioStatistics, estimate_parameter_distributions
 
@@ -26,5 +32,9 @@ __all__ = [
     "ScenarioStatistics",
     "estimate_parameter_distributions",
     "compute_erwin_coverage",
+
+    "ScenarioConvergenceAnalyzer",
+    "ConvergenceSummary",
+    "DistanceTriple",
 
 ]
