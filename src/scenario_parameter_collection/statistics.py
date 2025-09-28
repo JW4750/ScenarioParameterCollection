@@ -7,10 +7,12 @@ from typing import Dict, Iterable, List, Mapping, Optional
 
 import numpy as np
 import pandas as pd
+
 try:  # pragma: no cover - optional dependency import
     from scipy.stats import gaussian_kde
 except Exception:  # pragma: no cover - executed when SciPy is unavailable
     gaussian_kde = None
+
 
 from .catalog import SCENARIO_DEFINITIONS, ScenarioDefinition
 from .detection import ScenarioEvent
@@ -71,6 +73,7 @@ def events_to_dataframe(events: Iterable[ScenarioEvent]) -> pd.DataFrame:
     return pd.DataFrame.from_records(records)
 
 
+
 def _gaussian_kernel_pdf(
     values: np.ndarray, grid: np.ndarray, bandwidth: Optional[float]
 ) -> np.ndarray:
@@ -121,6 +124,7 @@ def _compute_pdf(
     return _gaussian_kernel_pdf(values, grid, bandwidth)
 
 
+
 def estimate_parameter_distributions(
     events: Iterable[ScenarioEvent],
     scenario_definitions: Mapping[str, ScenarioDefinition] | None = None,
@@ -166,7 +170,9 @@ def estimate_parameter_distributions(
                 span = max(v_max - v_min, 1e-3)
                 padding = 0.1 * span
                 grid = np.linspace(v_min - padding, v_max + padding, grid_size)
+
                 pdf = _compute_pdf(values, grid, bandwidth)
+
             scenario_distributions[name] = ParameterDistribution(
                 parameter=name,
                 grid=grid,
