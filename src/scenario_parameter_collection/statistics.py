@@ -7,7 +7,12 @@ from typing import Dict, Iterable, List, Mapping, Optional
 
 import numpy as np
 import pandas as pd
-from scipy.stats import gaussian_kde
+
+try:  # pragma: no cover - optional dependency import
+    from scipy.stats import gaussian_kde
+except Exception:  # pragma: no cover - executed when SciPy is unavailable
+    gaussian_kde = None
+
 
 from .catalog import SCENARIO_DEFINITIONS, ScenarioDefinition
 from .detection import ScenarioEvent
@@ -68,6 +73,58 @@ def events_to_dataframe(events: Iterable[ScenarioEvent]) -> pd.DataFrame:
     return pd.DataFrame.from_records(records)
 
 
+
+def _gaussian_kernel_pdf(
+    values: np.ndarray, grid: np.ndarray, bandwidth: Optional[float]
+) -> np.ndarray:
+    """Estimate a smooth probability density using Gaussian kernels.
+
+    This is used as a lightweight fallback when SciPy is not available. The
+    implementation follows the classic Gaussian KDE formulation with a
+    Silverman-style bandwidth heuristic.
+    """
+
+    values = np.asarray(values, dtype=float)
+    if bandwidth is None:
+        if values.size <= 1:
+            bandwidth = 1.0
+        else:
+            std = float(np.nanstd(values, ddof=1))
+            if not np.isfinite(std) or std <= 0:
+                std = float(np.nanstd(values, ddof=0))
+            if not np.isfinite(std) or std <= 0:
+                std = 1.0
+            bandwidth = 1.06 * std * (values.size ** (-1 / 5))
+            if bandwidth <= 0:
+                bandwidth = 1.0
+    else:
+        bandwidth = float(bandwidth)
+        if bandwidth <= 0:
+            bandwidth = 1.0
+
+    diffs = (grid[:, None] - values[None, :]) / bandwidth
+    kernel = np.exp(-0.5 * diffs**2) / (bandwidth * np.sqrt(2 * np.pi))
+    pdf = kernel.mean(axis=1)
+    normalization = np.trapz(pdf, grid)
+    if normalization > 0:
+        pdf = pdf / normalization
+    return pdf
+
+
+def _compute_pdf(
+    values: np.ndarray, grid: np.ndarray, bandwidth: Optional[float]
+) -> np.ndarray:
+    if gaussian_kde is not None:
+        kde = gaussian_kde(values, bw_method=bandwidth)
+        pdf = kde(grid)
+        normalization = np.trapz(pdf, grid)
+        if normalization > 0:
+            pdf = pdf / normalization
+        return pdf
+    return _gaussian_kernel_pdf(values, grid, bandwidth)
+
+
+
 def estimate_parameter_distributions(
     events: Iterable[ScenarioEvent],
     scenario_definitions: Mapping[str, ScenarioDefinition] | None = None,
@@ -113,11 +170,9 @@ def estimate_parameter_distributions(
                 span = max(v_max - v_min, 1e-3)
                 padding = 0.1 * span
                 grid = np.linspace(v_min - padding, v_max + padding, grid_size)
-                kde = gaussian_kde(values, bw_method=bandwidth)
-                pdf = kde(grid)
-                normalization = np.trapz(pdf, grid)
-                if normalization > 0:
-                    pdf = pdf / normalization
+
+                pdf = _compute_pdf(values, grid, bandwidth)
+
             scenario_distributions[name] = ParameterDistribution(
                 parameter=name,
                 grid=grid,

@@ -36,6 +36,22 @@ python -m scenario_parameter_collection.cli --tracks data/ --output-dir outputs
 - `outputs/scenario_counts.csv`：各类场景发生次数。
 - `outputs/parameter_distributions.json`：每个场景关键参数的概率密度函数（KDE 采样网格与概率值）。
 
+- `outputs/erwin_coverage.csv`：Erwin de Gelder 10 大功能场景的覆盖统计（含描述与计数）。
+- `outputs/erwin_coverage_summary.json`：覆盖率汇总（总事件数、已覆盖事件数、覆盖比、未覆盖事件数）。
+- `outputs/unmapped_events.csv`：未能映射到 Erwin 场景的事件明细（场景名称、时间、车道 ID 等）。
+
+3. **生成可视化报告**：
+
+```bash
+python -m scenario_parameter_collection.visualization --outputs outputs --html outputs/report.html
+```
+
+该命令会读取上一步生成的三个结果文件，自动构建包含以下内容的交互式 HTML 页面（Windows Edge 可直接打开）：
+
+- 场景发生频率柱状图及明细表格；
+- 各类场景关键参数的概率密度曲线；
+- 事件样例表（默认展示前 20 条）。
+
 ## Python API
 
 ```python
@@ -51,7 +67,7 @@ stats = estimate_parameter_distributions(events)
 print(stats.counts)
 ```
 
-更多场景定义及参数说明见 `docs/scenario_catalog.md`。
+更多场景定义及参数说明见 `docs/scenario_catalog.md`；Erwin de Gelder 场景覆盖映射与调研见 `docs/erwin_scenario_mapping.md`。
 
 ## 测试
 
@@ -60,5 +76,6 @@ pytest
 ```
 
 ## 许可证
+
 
 MIT License，详见 `LICENSE`。
