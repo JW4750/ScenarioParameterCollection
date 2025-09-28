@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Mapping
 
 import numpy as np
 import pandas as pd
 
 from .utils import find_boolean_segments
+from .tagging import assign_action_tags, summarise_tags, TAG_COLUMNS
 
 
 @dataclass
@@ -20,6 +21,7 @@ class ScenarioEvent:
     start_frame: int
     end_frame: int
     parameters: Dict[str, float] = field(default_factory=dict)
+    tags: Dict[str, str] = field(default_factory=dict)
 
     def duration(self, frame_rate: float) -> float:
         """Return the event duration in seconds for the given frame rate."""
@@ -58,6 +60,7 @@ class HighDScenarioDetector:
         following_rel_speed: float = 3.0,
         braking_threshold: float = -3.0,
         lead_braking_threshold: float = -2.5,
+        lead_acceleration_threshold: float = 1.5,
         slow_speed_threshold: float = 8.0,
         stationary_lead_speed: float = 2.0,
     ) -> None:
@@ -67,6 +70,7 @@ class HighDScenarioDetector:
         self.following_rel_speed = following_rel_speed
         self.braking_threshold = braking_threshold
         self.lead_braking_threshold = lead_braking_threshold
+        self.lead_acceleration_threshold = lead_acceleration_threshold
         self.slow_speed_threshold = slow_speed_threshold
         self.stationary_lead_speed = stationary_lead_speed
 
@@ -77,10 +81,19 @@ class HighDScenarioDetector:
 
         self._validate_columns(tracks)
         prepared = self._prepare_dataframe(tracks)
-        events: List[ScenarioEvent] = []
+        track_map: Dict[int, pd.DataFrame] = {}
         for track_id, track_df in prepared.groupby("id"):
-            sorted_track = track_df.sort_values("frame").reset_index(drop=True)
-            events.extend(self._detect_for_track(track_id=int(track_id), track=sorted_track))
+            track_map[int(track_id)] = track_df.sort_values("frame").reset_index(drop=True)
+
+        events: List[ScenarioEvent] = []
+        for track_id, track_df in track_map.items():
+            events.extend(
+                self._detect_for_track(
+                    track_id=int(track_id),
+                    track=track_df,
+                    all_tracks=track_map,
+                )
+            )
         return events
 
     # ------------------------------------------------------------------
@@ -121,15 +134,24 @@ class HighDScenarioDetector:
         df = df.merge(lead_info, on=["precedingId", "frame"], how="left")
         df["relative_speed"] = df["xVelocity"] - df["preceding_xVelocity"]
         df["relative_acceleration"] = df["xAcceleration"] - df["preceding_xAcceleration"]
+        tags = assign_action_tags(df, frame_rate=self.frame_rate)
+        for column in TAG_COLUMNS:
+            df[column] = tags[column]
         return df
 
     # ------------------------------------------------------------------
     # track-level detection
-    def _detect_for_track(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
+    def _detect_for_track(
+        self,
+        track_id: int,
+        track: pd.DataFrame,
+        all_tracks: Mapping[int, pd.DataFrame],
+    ) -> List[ScenarioEvent]:
         events: List[ScenarioEvent] = []
         events.extend(self._detect_free_driving(track_id, track))
         events.extend(self._detect_car_following(track_id, track))
         events.extend(self._detect_lead_braking(track_id, track))
+        events.extend(self._detect_lead_accelerating(track_id, track))
         events.extend(self._detect_ego_braking(track_id, track))
         events.extend(self._detect_cut_in(track_id, track, direction="left"))
         events.extend(self._detect_cut_in(track_id, track, direction="right"))
@@ -139,7 +161,16 @@ class HighDScenarioDetector:
         events.extend(self._detect_lane_change(track_id, track, direction="right"))
         events.extend(self._detect_slow_traffic(track_id, track))
         events.extend(self._detect_stationary_lead(track_id, track))
+        events.extend(self._detect_merge(track_id, track))
+        events.extend(self._detect_overtaking(track_id, track))
+        events.extend(self._detect_overtaken(track_id, track, all_tracks))
         return events
+
+    # ------------------------------------------------------------------
+    def _summarise_tags(self, window: pd.DataFrame) -> Dict[str, str]:
+        if window.empty:
+            return {}
+        return summarise_tags(window)
 
     # ------------------------------------------------------------------
     # scenario specific detectors
@@ -164,6 +195,7 @@ class HighDScenarioDetector:
                     start_frame=int(seg.start_frame),
                     end_frame=int(seg.end_frame),
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -196,6 +228,7 @@ class HighDScenarioDetector:
                     start_frame=int(seg.start_frame),
                     end_frame=int(seg.end_frame),
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -224,6 +257,35 @@ class HighDScenarioDetector:
                     start_frame=int(seg.start_frame),
                     end_frame=int(seg.end_frame),
                     parameters=params,
+                    tags=self._summarise_tags(window),
+                )
+            )
+        return events
+
+    def _detect_lead_accelerating(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
+        mask = (
+            (track["precedingId"] > 0)
+            & (track["preceding_xAcceleration"] >= self.lead_acceleration_threshold)
+            & (track["relative_speed"] <= 0.0)
+        )
+        min_length = max(1, int(self.frame_rate * 0.6))
+        segments = find_boolean_segments(track["frame"].tolist(), mask.tolist(), min_length)
+        events: List[ScenarioEvent] = []
+        for seg in segments:
+            window = track[(track["frame"] >= seg.start_frame) & (track["frame"] <= seg.end_frame)]
+            params = {
+                "max_lead_acc": float(window["preceding_xAcceleration"].max()),
+                "mean_relative_speed": float(window["relative_speed"].mean()),
+                "duration_s": seg.length / self.frame_rate,
+            }
+            events.append(
+                ScenarioEvent(
+                    scenario="lead_vehicle_accelerating",
+                    track_id=track_id,
+                    start_frame=int(seg.start_frame),
+                    end_frame=int(seg.end_frame),
+                    parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -253,6 +315,7 @@ class HighDScenarioDetector:
                     start_frame=int(seg.start_frame),
                     end_frame=int(seg.end_frame),
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -291,6 +354,9 @@ class HighDScenarioDetector:
                 "relative_speed_post": float(row["relative_speed"]),
                 "ttc_post": float(row["ttc"] if not pd.isna(row["ttc"]) else np.nan),
             }
+            window = track[
+                (track["frame"] >= start_frame) & (track["frame"] <= end_frame)
+            ]
             events.append(
                 ScenarioEvent(
                     scenario=scenario_name,
@@ -298,6 +364,7 @@ class HighDScenarioDetector:
                     start_frame=start_frame,
                     end_frame=end_frame,
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -334,6 +401,9 @@ class HighDScenarioDetector:
                 "gap_before_cut": float(track.iloc[idx]["dhw"]),
                 "relative_speed_before": float(track.iloc[idx]["relative_speed"]),
             }
+            window = track[
+                (track["frame"] >= start_frame) & (track["frame"] <= end_frame)
+            ]
             events.append(
                 ScenarioEvent(
                     scenario=scenario_name,
@@ -341,6 +411,7 @@ class HighDScenarioDetector:
                     start_frame=start_frame,
                     end_frame=end_frame,
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -373,6 +444,7 @@ class HighDScenarioDetector:
                     start_frame=start_frame,
                     end_frame=end_frame,
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -400,6 +472,7 @@ class HighDScenarioDetector:
                     start_frame=int(seg.start_frame),
                     end_frame=int(seg.end_frame),
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
         return events
@@ -427,6 +500,194 @@ class HighDScenarioDetector:
                     start_frame=int(seg.start_frame),
                     end_frame=int(seg.end_frame),
                     parameters=params,
+                    tags=self._summarise_tags(window),
                 )
             )
+        return events
+
+    def _detect_merge(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
+        events: List[ScenarioEvent] = []
+        lanes = track["laneId"].to_numpy()
+        frames = track["frame"].to_numpy()
+        half_window = int(self.frame_rate)
+        last_frame = int(frames[-1]) if len(frames) else 0
+        first_frame = int(frames[0]) if len(frames) else 0
+        for idx in range(1, len(track)):
+            prev_lane = lanes[idx - 1]
+            curr_lane = lanes[idx]
+            if prev_lane <= 0 < curr_lane:
+                direction = "right" if curr_lane > prev_lane else "left"
+                trailing_col = (
+                    "rightFollowingId" if direction == "right" else "leftFollowingId"
+                )
+                trailing_id = track.iloc[idx].get(trailing_col, 0)
+                if pd.isna(trailing_id) or int(trailing_id) <= 0:
+                    continue
+                start_frame = int(max(first_frame, frames[idx] - half_window))
+                end_frame = int(min(last_frame, frames[idx] + half_window))
+                window = track[
+                    (track["frame"] >= start_frame) & (track["frame"] <= end_frame)
+                ]
+                params = {
+                    "merge_direction": direction,
+                    "trailing_vehicle_id": int(trailing_id),
+                    "duration_s": (end_frame - start_frame + 1) / self.frame_rate,
+                }
+                events.append(
+                    ScenarioEvent(
+                        scenario="ego_merge_with_trailing_vehicle",
+                        track_id=track_id,
+                        start_frame=start_frame,
+                        end_frame=end_frame,
+                        parameters=params,
+                        tags=self._summarise_tags(window),
+                    )
+                )
+        return events
+
+    def _detect_overtaking(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
+        events: List[ScenarioEvent] = []
+        if track.empty:
+            return events
+        lanes = track["laneId"].to_numpy()
+        frames = track["frame"].to_numpy()
+        last_frame = int(frames[-1])
+        first_frame = int(frames[0])
+        half_window = int(self.frame_rate)
+
+        lane_changes: List[tuple[int, float, float]] = []
+        for idx in range(1, len(track)):
+            prev_lane = lanes[idx - 1]
+            curr_lane = lanes[idx]
+            if curr_lane != prev_lane:
+                lane_changes.append((idx, prev_lane, curr_lane))
+
+        for i, (idx, prev_lane, curr_lane) in enumerate(lane_changes):
+            if curr_lane >= prev_lane:
+                continue
+            for j in range(i + 1, len(lane_changes)):
+                idx2, prev_lane2, curr_lane2 = lane_changes[j]
+                if prev_lane2 == curr_lane and curr_lane2 == prev_lane:
+                    start_frame = int(max(first_frame, frames[idx] - half_window))
+                    end_frame = int(min(last_frame, frames[idx2] + half_window))
+                    window = track[
+                        (track["frame"] >= start_frame)
+                        & (track["frame"] <= end_frame)
+                    ]
+                    params = {
+                        "initial_gap": float(track.iloc[max(idx - 1, 0)]["dhw"]),
+                        "completion_gap": float(track.iloc[min(idx2, len(track) - 1)]["dhw"]),
+                        "overtake_duration_s": (end_frame - start_frame + 1)
+                        / self.frame_rate,
+                    }
+                    events.append(
+                        ScenarioEvent(
+                            scenario="ego_overtaking",
+                            track_id=track_id,
+                            start_frame=start_frame,
+                            end_frame=end_frame,
+                            parameters=params,
+                            tags=self._summarise_tags(window),
+                        )
+                    )
+                    break
+        return events
+
+    def _detect_overtaken(
+        self,
+        track_id: int,
+        track: pd.DataFrame,
+        all_tracks: Mapping[int, pd.DataFrame],
+    ) -> List[ScenarioEvent]:
+        events: List[ScenarioEvent] = []
+        if track.empty:
+            return events
+        frames = track["frame"].to_numpy()
+        last_frame = int(frames[-1])
+        first_frame = int(frames[0])
+        for side in ("left", "right"):
+            following_col = f"{side}FollowingId"
+            alongside_col = f"{side}AlongsideId"
+            preceding_col = f"{side}PrecedingId"
+            candidates = (
+                pd.concat(
+                    [
+                        track[following_col],
+                        track[alongside_col],
+                        track[preceding_col],
+                    ]
+                )
+                .dropna()
+                .astype(int)
+            )
+            for vehicle_id in sorted(set(candidates)):
+                if vehicle_id <= 0:
+                    continue
+                state = "none"
+                start_idx: int | None = None
+                end_idx: int | None = None
+                for idx in range(len(track)):
+                    row = track.iloc[idx]
+                    current_state = "none"
+                    if row.get(following_col) == vehicle_id:
+                        current_state = "following"
+                    elif row.get(alongside_col) == vehicle_id:
+                        current_state = "alongside"
+                    elif row.get(preceding_col) == vehicle_id:
+                        current_state = "preceding"
+
+                    if state == "none":
+                        if current_state == "following":
+                            state = "following"
+                            start_idx = idx
+                    elif state == "following":
+                        if current_state == "alongside":
+                            state = "alongside"
+                        elif current_state == "following":
+                            continue
+                        else:
+                            state = "none"
+                            start_idx = None
+                    elif state == "alongside":
+                        if current_state == "preceding":
+                            end_idx = idx
+                            break
+                        elif current_state == "alongside":
+                            continue
+                        else:
+                            state = "none"
+                            start_idx = None
+
+                if start_idx is None or end_idx is None:
+                    continue
+                start_frame = int(max(first_frame, frames[max(start_idx - 1, 0)]))
+                end_frame = int(min(last_frame, frames[min(end_idx + 1, len(track) - 1)]))
+                window = track[
+                    (track["frame"] >= start_frame) & (track["frame"] <= end_frame)
+                ]
+                other_track = all_tracks.get(int(vehicle_id))
+                overtaker_speed = float("nan")
+                if other_track is not None and not other_track.empty:
+                    mask = (other_track["frame"] >= start_frame) & (
+                        other_track["frame"] <= end_frame
+                    )
+                    if mask.any():
+                        overtaker_speed = float(other_track.loc[mask, "xVelocity"].mean())
+                params = {
+                    "overtaker_id": int(vehicle_id),
+                    "side": side,
+                    "overtaker_speed": overtaker_speed,
+                    "ego_speed": float(window["xVelocity"].mean()),
+                    "event_duration_s": (end_frame - start_frame + 1) / self.frame_rate,
+                }
+                events.append(
+                    ScenarioEvent(
+                        scenario="ego_overtaken_by_vehicle",
+                        track_id=track_id,
+                        start_frame=start_frame,
+                        end_frame=end_frame,
+                        parameters=params,
+                        tags=self._summarise_tags(window),
+                    )
+                )
         return events

@@ -150,6 +150,7 @@ def test_detector_finds_car_following_and_lane_change():
     stats = estimate_parameter_distributions(events)
     assert stats.counts["car_following"] >= 1
     assert "mean_thw" in stats.parameter_distributions["car_following"]
+    assert any(col.startswith("tag_") for col in stats.events.columns)
 
 
     coverage = compute_erwin_coverage(events, frame_rate=25.0)
@@ -234,6 +235,7 @@ def test_erwin_coverage_reports_unmapped():
             start_frame=100,
             end_frame=124,
             parameters={},
+            tags={"longitudinal": "cruising"},
         ),
     ]
     coverage = compute_erwin_coverage(events, frame_rate=25.0)
@@ -242,6 +244,7 @@ def test_erwin_coverage_reports_unmapped():
     assert coverage.coverage_ratio() == pytest.approx(0.5)
     assert len(coverage.unmatched_events) == 1
     assert coverage.unmatched_events[0].scenario == "free_driving"
+    assert coverage.unmatched_events[0].tags["longitudinal"] == "cruising"
 
 
 def test_visualization_report_creation(tmp_path: Path, monkeypatch):

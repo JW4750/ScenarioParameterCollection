@@ -107,12 +107,16 @@ SCENARIO_TO_ERWIN: Dict[str, str] = {
     "slow_traffic": "approach_low_speed_vehicle",
     "stationary_lead": "approach_low_speed_vehicle",
     "lead_vehicle_braking": "lead_vehicle_braking",
+    "lead_vehicle_accelerating": "lead_vehicle_accelerating",
     "cut_in_from_left": "lead_vehicle_cut_in",
     "cut_in_from_right": "lead_vehicle_cut_in",
     "cut_out_to_left": "lead_vehicle_cut_out",
     "cut_out_to_right": "lead_vehicle_cut_out",
     "ego_lane_change_left": "ego_lane_change_with_trailing_vehicle",
     "ego_lane_change_right": "ego_lane_change_with_trailing_vehicle",
+    "ego_merge_with_trailing_vehicle": "ego_merge_with_trailing_vehicle",
+    "ego_overtaking": "ego_overtaking",
+    "ego_overtaken_by_vehicle": "ego_overtaken_by_vehicle",
 }
 
 
@@ -126,6 +130,7 @@ class UnmatchedEvent:
     end_frame: int
     start_time_s: float
     end_time_s: float
+    tags: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -172,6 +177,7 @@ def compute_erwin_coverage(
                     end_frame=event.end_frame,
                     start_time_s=start_time_s,
                     end_time_s=end_time_s,
+                    tags=event.tags,
                 )
             )
             continue

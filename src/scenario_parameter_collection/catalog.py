@@ -136,6 +136,37 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "SOTIF examples for lead vehicle braking",
         ],
     ),
+    "lead_vehicle_accelerating": ScenarioDefinition(
+        name="lead_vehicle_accelerating",
+        description="Preceding vehicle accelerates away from ego, increasing headway.",
+        triggers=[
+            "Lead vehicle longitudinal acceleration above acceleration threshold",
+            "Relative speed changing towards opening gap",
+        ],
+        key_parameters=[
+            ScenarioParameter(
+                name="max_lead_acc",
+                description="Maximum longitudinal acceleration of the lead vehicle",
+                unit="m/s^2",
+                typical_range=(1.5, 4.0),
+            ),
+            ScenarioParameter(
+                name="mean_relative_speed",
+                description="Mean relative speed during acceleration",
+                unit="m/s",
+                typical_range=(-5.0, 0.0),
+            ),
+            ScenarioParameter(
+                name="duration_s",
+                description="Event duration",
+                unit="s",
+                typical_range=(0.5, 5.0),
+            ),
+        ],
+        references=[
+            "Schuldt et al. real-world scenario mining longitudinal actions",
+        ],
+    ),
     "ego_braking": ScenarioDefinition(
         name="ego_braking",
         description="Ego vehicle executes strong longitudinal deceleration irrespective of lead vehicle behaviour.",
@@ -341,6 +372,33 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "HighD lane-change benchmark",
         ],
     ),
+    "ego_merge_with_trailing_vehicle": ScenarioDefinition(
+        name="ego_merge_with_trailing_vehicle",
+        description="Ego merges from an on-ramp into the main lane while a trailing vehicle is present in the target lane.",
+        triggers=[
+            "LaneId transition from ramp (≤0) to mainline lane",
+            "Following vehicle detected in the target lane",
+        ],
+        key_parameters=[
+            ScenarioParameter(
+                name="merge_direction",
+                description="Direction of the merge relative to ego (left/right)",
+            ),
+            ScenarioParameter(
+                name="trailing_vehicle_id",
+                description="Identifier of the trailing vehicle in the target lane",
+            ),
+            ScenarioParameter(
+                name="duration_s",
+                description="Merge execution duration",
+                unit="s",
+                typical_range=(1.0, 6.0),
+            ),
+        ],
+        references=[
+            "Erwin de Gelder highway merge scenarios",
+        ],
+    ),
     "slow_traffic": ScenarioDefinition(
         name="slow_traffic",
         description="Stop-and-go traffic with speeds below congestion threshold while following another vehicle.",
@@ -401,6 +459,65 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
         ],
         references=[
             "AEB stationary target scenarios",
+        ],
+    ),
+    "ego_overtaking": ScenarioDefinition(
+        name="ego_overtaking",
+        description="Ego vehicle performs a left lane change to pass a slower vehicle and returns to the original lane.",
+        triggers=[
+            "Sequence of lane changes: own lane → faster lane → original lane",
+            "Increase in gap ahead after the manoeuvre",
+        ],
+        key_parameters=[
+            ScenarioParameter(
+                name="initial_gap",
+                description="Headway to the lead vehicle before the overtake",
+                unit="m",
+                typical_range=(5.0, 60.0),
+            ),
+            ScenarioParameter(
+                name="completion_gap",
+                description="Headway after returning to the original lane",
+                unit="m",
+                typical_range=(10.0, 80.0),
+            ),
+            ScenarioParameter(
+                name="overtake_duration_s",
+                description="Total duration of the overtake manoeuvre",
+                unit="s",
+                typical_range=(4.0, 15.0),
+            ),
+        ],
+        references=[
+            "Erwin de Gelder overtaking scenario description",
+        ],
+    ),
+    "ego_overtaken_by_vehicle": ScenarioDefinition(
+        name="ego_overtaken_by_vehicle",
+        description="Another vehicle passes ego on an adjacent lane from behind to ahead.",
+        triggers=[
+            "Adjacent vehicle transitions from following → alongside → preceding",
+            "Higher longitudinal speed of the overtaking vehicle",
+        ],
+        key_parameters=[
+            ScenarioParameter(
+                name="overtaker_id",
+                description="Identifier of the overtaking vehicle",
+            ),
+            ScenarioParameter(
+                name="overtaker_speed",
+                description="Mean longitudinal speed of the overtaker during the event",
+                unit="m/s",
+            ),
+            ScenarioParameter(
+                name="event_duration_s",
+                description="Duration of the overtaking interaction",
+                unit="s",
+                typical_range=(2.0, 10.0),
+            ),
+        ],
+        references=[
+            "ISO 34502 overtaking scenarios",
         ],
     ),
 }

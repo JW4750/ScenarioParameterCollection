@@ -100,6 +100,7 @@ def write_outputs(output_dir: Path, stats, coverage) -> None:
             "end_frame": event.end_frame,
             "start_time_s": event.start_time_s,
             "end_time_s": event.end_time_s,
+            **{f"tag_{key}": value for key, value in event.tags.items()},
         }
         for event in coverage.unmatched_events
     ]

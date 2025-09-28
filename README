@@ -7,17 +7,19 @@
 - **命令行工具**：`python -m scenario_parameter_collection.cli`，批量处理 CSV 文件并输出统计结果。
 
 - **收敛分析 CLI**：`scenario-convergence-analysis`，按录入顺序逐步引入 HighD 片段并评估场景频率、参数分布的收敛情况。
+- **标签时间轴工具链**：基于 Schuldt 等提出的“两步走”方法，为每帧打上纵向/横向/交互标签，并以标签组合的形式描述场景。
 
 
 ## 功能特性
 
 - 支持识别 12 类高速公路场景：自由巡航、稳定跟车、前车/自车制动、切入/切出、变道、拥堵跟驰、接近静止目标等。
+- 新增前车加速、主车汇入、主车超车、主车被超车等规则检测，可覆盖 Erwin de Gelder 10 大高速公路功能场景。
 - 自动补充前车的速度与加速度信息，基于规则的事件检测算法。
 - 统计每类场景的发生频率以及关键参数的概率密度函数（Gaussian KDE）。
 
 - 支持计算逐步引入 HighD 录制片段时的 MISE、对称 KL 散度、Hellinger 距离，评估何时达到稳定分布。
 
-- 将事件明细、频率统计、分布估计导出为 CSV/JSON，便于后续分析与可视化。
+- 将事件明细、标签组合、频率统计、分布估计导出为 CSV/JSON，便于后续分析与可视化。
 
 ## 安装
 
@@ -30,6 +32,7 @@ pip install -e .[dev]
 ## 使用示例
 
 1. **准备数据**：从 [https://www.highd-dataset.com/](https://www.highd-dataset.com/) 下载一个或多个 `*_tracks.csv` 文件，放置在 `data/` 目录。
+   - 请保持 HighD 官方文件命名（例如 `01_tracks.csv`），并参考 `docs/highd_dataset.md` 了解完整字段含义。
 2. **命令行执行**：
 
 ```bash
@@ -44,7 +47,7 @@ python -m scenario_parameter_collection.cli --tracks data/ --output-dir outputs
 
 - `outputs/erwin_coverage.csv`：Erwin de Gelder 10 大功能场景的覆盖统计（含描述与计数）。
 - `outputs/erwin_coverage_summary.json`：覆盖率汇总（总事件数、已覆盖事件数、覆盖比、未覆盖事件数）。
-- `outputs/unmapped_events.csv`：未能映射到 Erwin 场景的事件明细（场景名称、时间、车道 ID 等）。
+- `outputs/unmapped_events.csv`：未能映射到 Erwin 场景的事件明细（场景名称、时间、车道 ID 等），同时附带 `tag_longitudinal`、`tag_lateral`、`tag_interaction` 等标签组合，便于分析新增场景。
 
 3. **生成可视化报告**：
 

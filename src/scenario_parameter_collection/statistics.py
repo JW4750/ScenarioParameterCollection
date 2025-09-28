@@ -67,6 +67,8 @@ def events_to_dataframe(events: Iterable[ScenarioEvent]) -> pd.DataFrame:
             "end_frame": event.end_frame,
         }
         base.update(event.parameters)
+        for key, value in event.tags.items():
+            base[f"tag_{key}"] = value
         records.append(base)
     if not records:
         return pd.DataFrame(columns=["scenario", "track_id", "start_frame", "end_frame"])
