@@ -17,7 +17,10 @@ pytest.importorskip("plotly")
 from scenario_parameter_collection import statistics as stats_module
 from scenario_parameter_collection.cli import main as cli_main
 from scenario_parameter_collection.coverage import compute_erwin_coverage
-from scenario_parameter_collection.detection import HighDScenarioDetector, ScenarioEvent
+from scenario_parameter_collection.detection import (
+    HighDScenarioDetector,
+    ScenarioEvent,
+)
 from scenario_parameter_collection.highd_loader import load_tracks
 from scenario_parameter_collection.statistics import estimate_parameter_distributions
 from scenario_parameter_collection.visualization import generate_report
@@ -27,7 +30,7 @@ def make_synthetic_tracks() -> pd.DataFrame:
     """Build a compact set of tracks triggering multiple scenarios."""
 
 
-    frames = np.arange(0, 50)
+    frames = np.arange(0, 100)
     base_columns = {
         "frame": frames,
         "leftPrecedingId": np.zeros_like(frames),
@@ -39,9 +42,9 @@ def make_synthetic_tracks() -> pd.DataFrame:
         "yAcceleration": np.zeros_like(frames, dtype=float),
     }
 
-    lane_series = np.where(frames < 30, 2, 1)
+    lane_series = np.where(frames < 60, 2, 1)
     y_velocity = np.zeros_like(frames, dtype=float)
-    y_velocity[(frames >= 28) & (frames <= 32)] = 0.5
+    y_velocity[(frames >= 58) & (frames <= 62)] = 0.5
 
     ego = pd.DataFrame(base_columns)
     ego["id"] = 1
@@ -142,10 +145,14 @@ def write_highd_csv(tmp_path: Path) -> Path:
 def test_detector_finds_car_following_and_lane_change():
     tracks = make_synthetic_tracks()
     detector = HighDScenarioDetector(frame_rate=25.0)
-    events = detector.detect(tracks)
+    result = detector.detect(tracks)
+    events = result.events
     scenarios = {event.scenario for event in events}
     assert "car_following" in scenarios
     assert "ego_lane_change_left" in scenarios
+    assert result.total_frames == len(tracks[tracks["id"] == 1]["frame"]) + len(
+        tracks[tracks["id"] == 2]["frame"]
+    )
 
     stats = estimate_parameter_distributions(events)
     assert stats.counts["car_following"] >= 1
@@ -160,7 +167,7 @@ def test_detector_finds_car_following_and_lane_change():
 def test_statistics_fallback_without_scipy(monkeypatch):
     tracks = make_synthetic_tracks()
     detector = HighDScenarioDetector(frame_rate=25.0)
-    events = detector.detect(tracks)
+    events = detector.detect(tracks).events
 
     monkeypatch.setattr(stats_module, "gaussian_kde", None, raising=False)
     stats = stats_module.estimate_parameter_distributions(events)
@@ -176,7 +183,7 @@ def test_highd_loader_handles_csv_directory(tmp_path: Path):
     assert set(loaded["recording_id"].unique()) == {"01"}
 
     detector = HighDScenarioDetector(frame_rate=25.0)
-    events = detector.detect(loaded)
+    events = detector.detect(loaded).events
     assert any(event.scenario == "car_following" for event in events)
 
 
@@ -210,6 +217,8 @@ def test_cli_generates_outputs(tmp_path: Path, capsys, monkeypatch):
     erwin_counts_path = output_dir / "erwin_coverage.csv"
     erwin_summary_path = output_dir / "erwin_coverage_summary.json"
     unmapped_path = output_dir / "unmapped_events.csv"
+    unmatched_frames_path = output_dir / "unmatched_frames.csv"
+    frame_coverage_path = output_dir / "frame_coverage_summary.json"
 
     assert events_path.exists()
     assert counts_path.exists()
@@ -217,6 +226,8 @@ def test_cli_generates_outputs(tmp_path: Path, capsys, monkeypatch):
     assert erwin_counts_path.exists()
     assert erwin_summary_path.exists()
     assert unmapped_path.exists()
+    assert unmatched_frames_path.exists()
+    assert frame_coverage_path.exists()
 
 
 def test_erwin_coverage_reports_unmapped():

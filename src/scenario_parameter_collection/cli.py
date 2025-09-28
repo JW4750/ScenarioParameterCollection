@@ -13,7 +13,7 @@ from .catalog import SCENARIO_DEFINITIONS
 
 from .coverage import ERWIN_SCENARIOS, compute_erwin_coverage
 
-from .detection import HighDScenarioDetector
+from .detection import DetectionResult, HighDScenarioDetector
 from .highd_loader import load_tracks
 from .statistics import estimate_parameter_distributions
 
@@ -52,7 +52,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 
 
-def write_outputs(output_dir: Path, stats, coverage) -> None:
+def write_outputs(
+    output_dir: Path,
+    stats,
+    coverage,
+    detection_result: DetectionResult,
+) -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     events_path = output_dir / "scenario_events.csv"
@@ -62,6 +67,8 @@ def write_outputs(output_dir: Path, stats, coverage) -> None:
     erwin_counts_path = output_dir / "erwin_coverage.csv"
     erwin_summary_path = output_dir / "erwin_coverage_summary.json"
     unmatched_path = output_dir / "unmapped_events.csv"
+    unmatched_frames_path = output_dir / "unmatched_frames.csv"
+    frame_coverage_path = output_dir / "frame_coverage_summary.json"
 
     stats.events.to_csv(events_path, index=False)
     counts_df = pd.DataFrame(
@@ -115,6 +122,15 @@ def write_outputs(output_dir: Path, stats, coverage) -> None:
         ],
     ).to_csv(unmatched_path, index=False)
 
+    detection_result.unmatched_frames.to_csv(unmatched_frames_path, index=False)
+    coverage_payload = {
+        "total_frames": detection_result.total_frames,
+        "unmatched_frames": int(len(detection_result.unmatched_frames)),
+        "coverage_ratio": detection_result.coverage_ratio(),
+    }
+    with frame_coverage_path.open("w", encoding="utf-8") as fp:
+        json.dump(coverage_payload, fp, indent=2, ensure_ascii=False)
+
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -123,7 +139,8 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     tracks = load_tracks(args.tracks)
     detector = HighDScenarioDetector(frame_rate=args.frame_rate)
-    events = detector.detect(tracks)
+    detection_result = detector.detect(tracks)
+    events = detection_result.events
     stats = estimate_parameter_distributions(
         events,
         scenario_definitions=SCENARIO_DEFINITIONS,
@@ -154,8 +171,17 @@ def main(argv: Iterable[str] | None = None) -> None:
         for name in unmatched_names:
             print(f"  {name}")
 
+    unmatched_count = len(detection_result.unmatched_frames)
+    total_frames = detection_result.total_frames
+    coverage_ratio = detection_result.coverage_ratio()
+    print(
+        "Frame coverage: "
+        f"{total_frames - unmatched_count}/{total_frames} "
+        f"({coverage_ratio:.1%})"
+    )
+
     output_dir = Path(args.output_dir)
-    write_outputs(output_dir, stats, coverage)
+    write_outputs(output_dir, stats, coverage, detection_result)
 
     print(f"Results written to {output_dir.resolve()}")
 

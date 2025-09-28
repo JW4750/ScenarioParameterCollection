@@ -1,9 +1,9 @@
-"""Scenario detection for the HighD dataset."""
+"""Scenario detection for the HighD dataset using tag combinations."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List
+from typing import Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -27,8 +27,213 @@ class ScenarioEvent:
         return (self.end_frame - self.start_frame + 1) / frame_rate
 
 
+@dataclass(frozen=True)
+class ScenarioPattern:
+    """Definition of a scenario in terms of tag combinations."""
+
+    name: str
+    required_tags: Tuple[str, ...] = ()
+    any_tags: Tuple[str, ...] = ()
+    forbidden_tags: Tuple[str, ...] = ()
+    min_duration_s: float = 1.0
+    expansion_s: float = 0.0
+    parameter_fn: Callable[[pd.DataFrame, float], Dict[str, float]] | None = None
+
+
+@dataclass
+class DetectionResult:
+    """Container holding detected events and frame coverage statistics."""
+
+    events: List[ScenarioEvent]
+    unmatched_frames: pd.DataFrame
+    total_frames: int
+
+    def covered_frames(self) -> int:
+        return int(self.total_frames - len(self.unmatched_frames))
+
+    def coverage_ratio(self) -> float:
+        if self.total_frames == 0:
+            return 0.0
+        return self.covered_frames() / self.total_frames
+
+
+def _default_parameter_extractor(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    """Fallback parameter extractor returning only the duration."""
+
+    if window.empty:
+        return {"duration_s": 0.0}
+    duration = (int(window.iloc[-1]["frame"]) - int(window.iloc[0]["frame"]) + 1) / frame_rate
+    return {"duration_s": float(duration)}
+
+
+def _mean_speed_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "speed": float(window["xVelocity"].mean()),
+            "acceleration": float(window["xAcceleration"].mean()),
+        }
+    )
+    return params
+
+
+def _free_flow_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _mean_speed_parameters(window, frame_rate)
+    return params
+
+
+def _car_following_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "mean_thw": float(window["thw"].mean()),
+            "mean_dhw": float(window["dhw"].mean()),
+            "mean_relative_speed": float(window["relative_speed"].mean()),
+        }
+    )
+    return params
+
+
+def _car_following_close_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _car_following_parameters(window, frame_rate)
+    params["min_thw"] = float(window["thw"].min())
+    return params
+
+
+def _approaching_lead_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "mean_relative_speed": float(window["relative_speed"].mean()),
+            "min_ttc": float(window["ttc"].min()),
+            "min_thw": float(window["thw"].min()),
+        }
+    )
+    return params
+
+
+def _lead_braking_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "min_lead_acc": float(window["preceding_xAcceleration"].min()),
+            "min_ttc": float(window["ttc"].min()),
+            "min_thw": float(window["thw"].min()),
+        }
+    )
+    return params
+
+
+def _ego_braking_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    min_acc = float(window["xAcceleration"].min())
+    speeds = window["xVelocity"].dropna()
+    if not speeds.empty:
+        speed_drop = float(speeds.iloc[0] - speeds.iloc[-1])
+    else:
+        speed_drop = 0.0
+    params.update({"min_acc": min_acc, "speed_drop": speed_drop})
+    return params
+
+
+def _ego_emergency_braking_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _ego_braking_parameters(window, frame_rate)
+    params["min_acc"] = float(window["xAcceleration"].min())
+    params["peak_jerk"] = float(window["xAcceleration"].diff().abs().max() * frame_rate)
+    return params
+
+
+def _cut_in_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "gap_post_cut": float(window["dhw"].iloc[-1]),
+            "relative_speed_post": float(window["relative_speed"].iloc[-1]),
+            "ttc_post": float(window["ttc"].iloc[-1]),
+        }
+    )
+    return params
+
+
+def _cut_out_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "gap_before_cut": float(window["dhw"].iloc[0]),
+            "relative_speed_before": float(window["relative_speed"].iloc[0]),
+        }
+    )
+    return params
+
+
+def _lane_change_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "max_abs_y_velocity": float(window["yVelocity"].abs().max()),
+            "speed_mean": float(window["xVelocity"].mean()),
+        }
+    )
+    return params
+
+
+def _slow_traffic_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "mean_speed": float(window["xVelocity"].mean()),
+            "mean_thw": float(window["thw"].mean()),
+        }
+    )
+    return params
+
+
+def _stationary_lead_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "min_ttc": float(window["ttc"].min()),
+            "lead_speed": float(window["preceding_xVelocity"].mean()),
+        }
+    )
+    return params
+
+
+def _stop_and_go_parameters(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
+    params = _default_parameter_extractor(window, frame_rate)
+    params.update(
+        {
+            "max_acc": float(window["xAcceleration"].max()),
+            "final_speed": float(window["xVelocity"].iloc[-1]),
+        }
+    )
+    return params
+
+
+PARAMETER_FUNCTIONS: Mapping[str, Callable[[pd.DataFrame, float], Dict[str, float]]] = {
+    "free_driving": _free_flow_parameters,
+    "free_acceleration": _mean_speed_parameters,
+    "free_deceleration": _mean_speed_parameters,
+    "car_following": _car_following_parameters,
+    "car_following_close": _car_following_close_parameters,
+    "approaching_lead_vehicle": _approaching_lead_parameters,
+    "lead_vehicle_braking": _lead_braking_parameters,
+    "ego_braking": _ego_braking_parameters,
+    "ego_emergency_braking": _ego_emergency_braking_parameters,
+    "cut_in_from_left": _cut_in_parameters,
+    "cut_in_from_right": _cut_in_parameters,
+    "cut_out_to_left": _cut_out_parameters,
+    "cut_out_to_right": _cut_out_parameters,
+    "ego_lane_change_left": _lane_change_parameters,
+    "ego_lane_change_right": _lane_change_parameters,
+    "slow_traffic": _slow_traffic_parameters,
+    "stationary_lead": _stationary_lead_parameters,
+    "stop_and_go_start": _stop_and_go_parameters,
+}
+
+
 class HighDScenarioDetector:
-    """Rule-based scenario detector tailored to HighD trajectory data."""
+    """Tag-based scenario detector tailored to HighD trajectory data."""
 
     required_columns: Iterable[str] = (
         "id",
@@ -60,6 +265,10 @@ class HighDScenarioDetector:
         lead_braking_threshold: float = -2.5,
         slow_speed_threshold: float = 8.0,
         stationary_lead_speed: float = 2.0,
+        acceleration_threshold: float = 0.3,
+        approach_rel_speed: float = 1.0,
+        lane_change_window_s: float = 0.6,
+        cut_window_s: float = 0.5,
     ) -> None:
         self.frame_rate = frame_rate
         self.min_free_speed = min_free_speed
@@ -69,19 +278,43 @@ class HighDScenarioDetector:
         self.lead_braking_threshold = lead_braking_threshold
         self.slow_speed_threshold = slow_speed_threshold
         self.stationary_lead_speed = stationary_lead_speed
+        self.acceleration_threshold = acceleration_threshold
+        self.approach_rel_speed = approach_rel_speed
+        self.lane_change_window_s = lane_change_window_s
+        self.cut_window_s = cut_window_s
 
     # ------------------------------------------------------------------
     # public API
-    def detect(self, tracks: pd.DataFrame) -> List[ScenarioEvent]:
-        """Detect scenarios in the provided HighD tracks dataframe."""
+    def detect(self, tracks: pd.DataFrame) -> DetectionResult:
+        """Detect scenarios and frame coverage in the provided HighD tracks dataframe."""
 
         self._validate_columns(tracks)
         prepared = self._prepare_dataframe(tracks)
         events: List[ScenarioEvent] = []
+        covered_frames: Dict[int, set[int]] = {}
+        total_frames = 0
+        unmatched_rows: List[Dict[str, int]] = []
+
         for track_id, track_df in prepared.groupby("id"):
             sorted_track = track_df.sort_values("frame").reset_index(drop=True)
-            events.extend(self._detect_for_track(track_id=int(track_id), track=sorted_track))
-        return events
+            tagged_track = self._tag_track(sorted_track)
+            track_events = self._detect_for_track(track_id=int(track_id), track=tagged_track)
+            events.extend(track_events)
+
+            frame_set: set[int] = set()
+            for event in track_events:
+                frame_set.update(range(event.start_frame, event.end_frame + 1))
+            covered_frames[int(track_id)] = frame_set
+
+            track_frames = sorted_track["frame"].astype(int).tolist()
+            total_frames += len(track_frames)
+            uncovered = [frame for frame in track_frames if frame not in frame_set]
+            unmatched_rows.extend(
+                {"track_id": int(track_id), "frame": int(frame)} for frame in uncovered
+            )
+
+        unmatched_frames = pd.DataFrame(unmatched_rows, columns=["track_id", "frame"])
+        return DetectionResult(events=events, unmatched_frames=unmatched_frames, total_frames=total_frames)
 
     # ------------------------------------------------------------------
     # dataframe preparation
@@ -92,10 +325,8 @@ class HighDScenarioDetector:
 
     def _prepare_dataframe(self, tracks: pd.DataFrame) -> pd.DataFrame:
         df = tracks.copy()
-        # normalise NaN encodings for THW/TTC
         df["thw"] = df["thw"].replace({0: np.nan, -1: np.nan})
         df["ttc"] = df["ttc"].replace({0: np.nan, -1: np.nan})
-        # ensure floats
         numeric_cols = [
             "xVelocity",
             "yVelocity",
@@ -106,7 +337,7 @@ class HighDScenarioDetector:
             "ttc",
         ]
         df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
-        # add preceding vehicle information
+
         lead_cols = {
             "id": "precedingId",
             "xVelocity": "preceding_xVelocity",
@@ -127,306 +358,289 @@ class HighDScenarioDetector:
     # track-level detection
     def _detect_for_track(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
         events: List[ScenarioEvent] = []
-        events.extend(self._detect_free_driving(track_id, track))
-        events.extend(self._detect_car_following(track_id, track))
-        events.extend(self._detect_lead_braking(track_id, track))
-        events.extend(self._detect_ego_braking(track_id, track))
-        events.extend(self._detect_cut_in(track_id, track, direction="left"))
-        events.extend(self._detect_cut_in(track_id, track, direction="right"))
-        events.extend(self._detect_cut_out(track_id, track, direction="left"))
-        events.extend(self._detect_cut_out(track_id, track, direction="right"))
-        events.extend(self._detect_lane_change(track_id, track, direction="left"))
-        events.extend(self._detect_lane_change(track_id, track, direction="right"))
-        events.extend(self._detect_slow_traffic(track_id, track))
-        events.extend(self._detect_stationary_lead(track_id, track))
+        for pattern in self._scenario_patterns():
+            events.extend(self._match_pattern(track_id, track, pattern))
         return events
+
+    def _scenario_patterns(self) -> Sequence[ScenarioPattern]:
+        return (
+            ScenarioPattern(
+                name="free_driving",
+                required_tags=("tag_lane_keep", "tag_free_flow", "tag_speed_high"),
+                any_tags=("tag_lon_cruising", "tag_lon_accelerating"),
+                min_duration_s=2.0,
+                parameter_fn=PARAMETER_FUNCTIONS["free_driving"],
+            ),
+            ScenarioPattern(
+                name="free_acceleration",
+                required_tags=("tag_free_flow", "tag_lon_accelerating"),
+                forbidden_tags=("tag_lead_present",),
+                min_duration_s=1.2,
+                parameter_fn=PARAMETER_FUNCTIONS["free_acceleration"],
+            ),
+            ScenarioPattern(
+                name="free_deceleration",
+                required_tags=("tag_free_flow", "tag_lon_decelerating"),
+                forbidden_tags=("tag_lead_present",),
+                min_duration_s=1.2,
+                parameter_fn=PARAMETER_FUNCTIONS["free_deceleration"],
+            ),
+            ScenarioPattern(
+                name="car_following",
+                required_tags=("tag_lead_present", "tag_following_medium", "tag_lane_keep"),
+                forbidden_tags=("tag_following_close",),
+                min_duration_s=1.5,
+                parameter_fn=PARAMETER_FUNCTIONS["car_following"],
+            ),
+            ScenarioPattern(
+                name="car_following_close",
+                required_tags=("tag_lead_present", "tag_following_close", "tag_lane_keep"),
+                min_duration_s=1.6,
+                parameter_fn=PARAMETER_FUNCTIONS["car_following_close"],
+            ),
+            ScenarioPattern(
+                name="approaching_lead_vehicle",
+                required_tags=("tag_lead_present", "tag_approaching_lead", "tag_lane_keep"),
+                forbidden_tags=("tag_lead_braking",),
+                min_duration_s=1.2,
+                parameter_fn=PARAMETER_FUNCTIONS["approaching_lead_vehicle"],
+            ),
+            ScenarioPattern(
+                name="lead_vehicle_braking",
+                required_tags=("tag_lead_present", "tag_lead_braking"),
+                min_duration_s=0.6,
+                parameter_fn=PARAMETER_FUNCTIONS["lead_vehicle_braking"],
+            ),
+            ScenarioPattern(
+                name="ego_braking",
+                required_tags=("tag_lon_decelerating",),
+                forbidden_tags=("tag_lead_braking",),
+                min_duration_s=0.8,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_braking"],
+            ),
+            ScenarioPattern(
+                name="ego_emergency_braking",
+                required_tags=("tag_lon_hard_brake",),
+                min_duration_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_emergency_braking"],
+            ),
+            ScenarioPattern(
+                name="cut_in_from_left",
+                required_tags=("tag_cut_in_left",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_in_from_left"],
+            ),
+            ScenarioPattern(
+                name="cut_in_from_right",
+                required_tags=("tag_cut_in_right",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_in_from_right"],
+            ),
+            ScenarioPattern(
+                name="cut_out_to_left",
+                required_tags=("tag_cut_out_left",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_out_to_left"],
+            ),
+            ScenarioPattern(
+                name="cut_out_to_right",
+                required_tags=("tag_cut_out_right",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_out_to_right"],
+            ),
+            ScenarioPattern(
+                name="ego_lane_change_left",
+                required_tags=("tag_lane_change_left",),
+                min_duration_s=1.0,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_lane_change_left"],
+            ),
+            ScenarioPattern(
+                name="ego_lane_change_right",
+                required_tags=("tag_lane_change_right",),
+                min_duration_s=1.0,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_lane_change_right"],
+            ),
+            ScenarioPattern(
+                name="slow_traffic",
+                required_tags=("tag_lead_present", "tag_slow_speed"),
+                min_duration_s=3.0,
+                parameter_fn=PARAMETER_FUNCTIONS["slow_traffic"],
+            ),
+            ScenarioPattern(
+                name="stationary_lead",
+                required_tags=("tag_lead_present", "tag_lead_stationary"),
+                min_duration_s=0.6,
+                parameter_fn=PARAMETER_FUNCTIONS["stationary_lead"],
+            ),
+            ScenarioPattern(
+                name="stop_and_go_start",
+                required_tags=("tag_lead_present", "tag_stop_and_go"),
+                min_duration_s=1.0,
+                parameter_fn=PARAMETER_FUNCTIONS["stop_and_go_start"],
+            ),
+        )
 
     # ------------------------------------------------------------------
-    # scenario specific detectors
-    def _detect_free_driving(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
-        mask = (
-            (track["precedingId"] <= 0) | (track["dhw"] > self.free_gap)
-        ) & (track["xVelocity"] >= self.min_free_speed)
-        min_length = int(self.frame_rate * 2)
-        segments = find_boolean_segments(track["frame"].tolist(), mask.tolist(), min_length)
-        events: List[ScenarioEvent] = []
-        for seg in segments:
-            window = track[(track["frame"] >= seg.start_frame) & (track["frame"] <= seg.end_frame)]
-            params = {
-                "speed": float(window["xVelocity"].mean()),
-                "acceleration": float(window["xAcceleration"].mean()),
-                "duration_s": seg.length / self.frame_rate,
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario="free_driving",
-                    track_id=track_id,
-                    start_frame=int(seg.start_frame),
-                    end_frame=int(seg.end_frame),
-                    parameters=params,
-                )
-            )
-        return events
+    # tag computation and pattern matching
+    def _tag_track(self, track: pd.DataFrame) -> pd.DataFrame:
+        track = track.copy()
+        acc = track["xAcceleration"].fillna(0.0)
+        track["tag_lon_accelerating"] = acc >= self.acceleration_threshold
+        track["tag_lon_decelerating"] = acc <= -self.acceleration_threshold
+        track["tag_lon_hard_brake"] = acc <= self.braking_threshold
+        track["tag_lon_cruising"] = ~(track["tag_lon_accelerating"] | track["tag_lon_decelerating"])
 
-    def _detect_car_following(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
-        mask = (
-            (track["precedingId"] > 0)
-            & (track["thw"].between(0.7, 3.0))
-            & (track["ttc"].fillna(np.inf) > 3.0)
-            & (track["relative_speed"].abs() <= self.following_rel_speed)
-        )
-        min_length = int(self.frame_rate * 2)
-        segments = find_boolean_segments(track["frame"].tolist(), mask.tolist(), min_length)
-        events: List[ScenarioEvent] = []
-        for seg in segments:
-            window = track[(track["frame"] >= seg.start_frame) & (track["frame"] <= seg.end_frame)]
-            # enforce lane stability
-            if window["laneId"].nunique(dropna=True) > 1:
-                continue
-            params = {
-                "mean_thw": float(window["thw"].mean()),
-                "mean_dhw": float(window["dhw"].mean()),
-                "mean_relative_speed": float(window["relative_speed"].mean()),
-                "duration_s": seg.length / self.frame_rate,
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario="car_following",
-                    track_id=track_id,
-                    start_frame=int(seg.start_frame),
-                    end_frame=int(seg.end_frame),
-                    parameters=params,
-                )
-            )
-        return events
+        velocity = track["xVelocity"].fillna(0.0)
+        track["tag_speed_high"] = velocity >= self.min_free_speed
+        track["tag_slow_speed"] = velocity <= self.slow_speed_threshold
 
-    def _detect_lead_braking(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
-        mask = (
-            (track["precedingId"] > 0)
-            & (track["preceding_xAcceleration"] <= self.lead_braking_threshold)
-            & (track["thw"].fillna(np.inf) < 3.5)
-        )
-        min_length = max(1, int(self.frame_rate * 0.6))
-        segments = find_boolean_segments(track["frame"].tolist(), mask.tolist(), min_length)
-        events: List[ScenarioEvent] = []
-        for seg in segments:
-            window = track[(track["frame"] >= seg.start_frame) & (track["frame"] <= seg.end_frame)]
-            params = {
-                "min_lead_acc": float(window["preceding_xAcceleration"].min()),
-                "min_ttc": float(window["ttc"].min()),
-                "min_thw": float(window["thw"].min()),
-                "duration_s": seg.length / self.frame_rate,
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario="lead_vehicle_braking",
-                    track_id=track_id,
-                    start_frame=int(seg.start_frame),
-                    end_frame=int(seg.end_frame),
-                    parameters=params,
-                )
-            )
-        return events
+        lead_present = track["precedingId"].fillna(0) > 0
+        track["tag_lead_present"] = lead_present
+        track["tag_free_flow"] = (~lead_present) | (track["dhw"].fillna(np.inf) > self.free_gap)
 
-    def _detect_ego_braking(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
-        mask = track["xAcceleration"] <= self.braking_threshold
-        min_length = max(1, int(self.frame_rate * 0.6))
-        segments = find_boolean_segments(track["frame"].tolist(), mask.tolist(), min_length)
-        events: List[ScenarioEvent] = []
-        for seg in segments:
-            window = track[(track["frame"] >= seg.start_frame) & (track["frame"] <= seg.end_frame)]
-            speeds = window["xVelocity"].dropna()
-            if speeds.empty:
-                continue
-            speed_drop = float(speeds.iloc[0] - speeds.iloc[-1])
-            if speed_drop < 1.0:
-                continue
-            params = {
-                "min_acc": float(window["xAcceleration"].min()),
-                "speed_drop": speed_drop,
-                "duration_s": seg.length / self.frame_rate,
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario="ego_braking",
-                    track_id=track_id,
-                    start_frame=int(seg.start_frame),
-                    end_frame=int(seg.end_frame),
-                    parameters=params,
-                )
-            )
-        return events
+        thw = track["thw"].fillna(np.inf)
+        track["tag_following_medium"] = lead_present & thw.between(0.8, 3.0)
+        track["tag_following_close"] = lead_present & (thw < 1.0)
 
-    def _detect_cut_in(self, track_id: int, track: pd.DataFrame, direction: str) -> List[ScenarioEvent]:
-        neighbour_cols = (
-            ["leftPrecedingId", "leftAlongsideId", "leftFollowingId"]
-            if direction == "left"
-            else ["rightPrecedingId", "rightAlongsideId", "rightFollowingId"]
-        )
-        scenario_name = "cut_in_from_left" if direction == "left" else "cut_in_from_right"
-        current_lead = track["precedingId"]
-        previous_lead = current_lead.shift(1)
-        mask = (current_lead > 0) & (current_lead != previous_lead)
-        events: List[ScenarioEvent] = []
-        half_window = int(self.frame_rate * 0.5)
-        for idx in np.where(mask)[0]:
+        rel_speed = track["relative_speed"].fillna(0.0)
+        track["tag_approaching_lead"] = lead_present & (rel_speed > self.approach_rel_speed)
+
+        lead_acc = track["preceding_xAcceleration"].fillna(0.0)
+        track["tag_lead_braking"] = lead_present & (lead_acc <= self.lead_braking_threshold)
+
+        lead_speed = track["preceding_xVelocity"].fillna(np.inf)
+        track["tag_lead_stationary"] = lead_present & (lead_speed <= self.stationary_lead_speed)
+
+        track["tag_stop_and_go"] = track["tag_slow_speed"] & track["tag_lon_accelerating"]
+
+        lane_change_window = max(1, int(round(self.lane_change_window_s * self.frame_rate)))
+        cut_window = max(1, int(round(self.cut_window_s * self.frame_rate)))
+
+        lane_series = track["laneId"].copy()
+        lane_series = lane_series.ffill().bfill()
+        lane_diff = lane_series.diff().fillna(0)
+        left_indices = np.where(lane_diff < 0)[0]
+        right_indices = np.where(lane_diff > 0)[0]
+
+        tag_lane_change_left = np.zeros(len(track), dtype=bool)
+        tag_lane_change_right = np.zeros(len(track), dtype=bool)
+
+        for idx in left_indices:
+            start = max(0, idx - lane_change_window)
+            end = min(len(track) - 1, idx + lane_change_window)
+            tag_lane_change_left[start : end + 1] = True
+
+        for idx in right_indices:
+            start = max(0, idx - lane_change_window)
+            end = min(len(track) - 1, idx + lane_change_window)
+            tag_lane_change_right[start : end + 1] = True
+
+        track["tag_lane_change_left"] = tag_lane_change_left
+        track["tag_lane_change_right"] = tag_lane_change_right
+        track["tag_lane_keep"] = ~(tag_lane_change_left | tag_lane_change_right)
+
+        tag_cut_in_left = np.zeros(len(track), dtype=bool)
+        tag_cut_in_right = np.zeros(len(track), dtype=bool)
+        tag_cut_out_left = np.zeros(len(track), dtype=bool)
+        tag_cut_out_right = np.zeros(len(track), dtype=bool)
+
+        current_lead = track["precedingId"].fillna(0)
+        previous_lead = current_lead.shift(1).fillna(current_lead)
+        next_lead = current_lead.shift(-1).fillna(current_lead)
+
+        left_cols = ["leftPrecedingId", "leftAlongsideId", "leftFollowingId"]
+        right_cols = ["rightPrecedingId", "rightAlongsideId", "rightFollowingId"]
+
+        def _mark_event(series: np.ndarray, index: int) -> None:
+            start = max(0, index - cut_window)
+            end = min(len(series) - 1, index + cut_window)
+            series[start : end + 1] = True
+
+        for idx in np.where((current_lead > 0) & (current_lead != previous_lead))[0]:
             new_lead = current_lead.iloc[idx]
             row = track.iloc[idx]
-            if row.get("laneId") != track.iloc[max(idx - 1, 0)]["laneId"]:
-                # lane change events are handled separately
+            if idx > 0 and row.get("laneId") != track.iloc[idx - 1].get("laneId"):
                 continue
-            neighbour_match = False
-            for col in neighbour_cols:
-                value = row.get(col)
-                if pd.notna(value) and value == new_lead:
-                    neighbour_match = True
-                    break
-            if not neighbour_match:
-                continue
-            frame = int(row["frame"])
-            start_frame = int(max(track.iloc[0]["frame"], frame - half_window))
-            end_frame = int(min(track.iloc[len(track) - 1]["frame"], frame + half_window))
-            params = {
-                "gap_post_cut": float(row["dhw"]),
-                "relative_speed_post": float(row["relative_speed"]),
-                "ttc_post": float(row["ttc"] if not pd.isna(row["ttc"]) else np.nan),
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario=scenario_name,
-                    track_id=track_id,
-                    start_frame=start_frame,
-                    end_frame=end_frame,
-                    parameters=params,
-                )
-            )
-        return events
+            if any(row.get(col) == new_lead for col in left_cols):
+                _mark_event(tag_cut_in_left, idx)
+            if any(row.get(col) == new_lead for col in right_cols):
+                _mark_event(tag_cut_in_right, idx)
 
-    def _detect_cut_out(self, track_id: int, track: pd.DataFrame, direction: str) -> List[ScenarioEvent]:
-        neighbour_cols = (
-            ["leftPrecedingId", "leftAlongsideId", "leftFollowingId"]
-            if direction == "left"
-            else ["rightPrecedingId", "rightAlongsideId", "rightFollowingId"]
-        )
-        scenario_name = "cut_out_to_left" if direction == "left" else "cut_out_to_right"
-        current_lead = track["precedingId"]
-        next_lead = current_lead.shift(-1)
-        mask = (current_lead > 0) & (current_lead != next_lead)
-        events: List[ScenarioEvent] = []
-        half_window = int(self.frame_rate * 0.5)
-        for idx in np.where(mask)[0]:
+        for idx in np.where((current_lead > 0) & (current_lead != next_lead))[0]:
             old_lead = current_lead.iloc[idx]
             if old_lead <= 0:
                 continue
             row_next = track.iloc[min(idx + 1, len(track) - 1)]
-            neighbour_match = False
-            for col in neighbour_cols:
-                value = row_next.get(col)
-                if pd.notna(value) and value == old_lead:
-                    neighbour_match = True
-                    break
-            if not neighbour_match:
+            if any(row_next.get(col) == old_lead for col in left_cols):
+                _mark_event(tag_cut_out_left, idx)
+            if any(row_next.get(col) == old_lead for col in right_cols):
+                _mark_event(tag_cut_out_right, idx)
+
+        track["tag_cut_in_left"] = tag_cut_in_left
+        track["tag_cut_in_right"] = tag_cut_in_right
+        track["tag_cut_out_left"] = tag_cut_out_left
+        track["tag_cut_out_right"] = tag_cut_out_right
+
+        return track
+
+    def _match_pattern(self, track_id: int, track: pd.DataFrame, pattern: ScenarioPattern) -> List[ScenarioEvent]:
+        mask = np.ones(len(track), dtype=bool)
+
+        for tag in pattern.required_tags:
+            if tag not in track:
+                mask &= False
                 continue
-            frame = int(track.iloc[idx]["frame"])
-            start_frame = int(max(track.iloc[0]["frame"], frame - half_window))
-            end_frame = int(min(track.iloc[len(track) - 1]["frame"], frame + half_window))
-            params = {
-                "gap_before_cut": float(track.iloc[idx]["dhw"]),
-                "relative_speed_before": float(track.iloc[idx]["relative_speed"]),
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario=scenario_name,
-                    track_id=track_id,
-                    start_frame=start_frame,
-                    end_frame=end_frame,
-                    parameters=params,
-                )
-            )
-        return events
+            mask &= track[tag].to_numpy(dtype=bool)
 
-    def _detect_lane_change(self, track_id: int, track: pd.DataFrame, direction: str) -> List[ScenarioEvent]:
-        lane_series = track["laneId"]
-        lane_diff = lane_series.diff()
-        if direction == "left":
-            change_mask = lane_diff < 0
-            scenario_name = "ego_lane_change_left"
-        else:
-            change_mask = lane_diff > 0
-            scenario_name = "ego_lane_change_right"
+        if pattern.any_tags:
+            any_mask = np.zeros(len(track), dtype=bool)
+            for tag in pattern.any_tags:
+                if tag in track:
+                    any_mask |= track[tag].to_numpy(dtype=bool)
+            mask &= any_mask
+
+        for tag in pattern.forbidden_tags:
+            if tag in track:
+                mask &= ~track[tag].to_numpy(dtype=bool)
+
+        if not mask.any():
+            return []
+
+        min_length = max(1, int(round(pattern.min_duration_s * self.frame_rate)))
+        segments = find_boolean_segments(track["frame"].astype(int).tolist(), mask.tolist(), min_length)
+
         events: List[ScenarioEvent] = []
-        half_window = int(self.frame_rate * 0.6)
-        for idx in np.where(change_mask)[0]:
-            frame = int(track.iloc[idx]["frame"])
-            start_frame = int(max(track.iloc[0]["frame"], frame - half_window))
-            end_frame = int(min(track.iloc[len(track) - 1]["frame"], frame + half_window))
+        if not segments:
+            return events
+
+        expansion = int(round(pattern.expansion_s * self.frame_rate)) if pattern.expansion_s else 0
+        min_frame = int(track.iloc[0]["frame"])
+        max_frame = int(track.iloc[-1]["frame"])
+
+        parameter_fn = pattern.parameter_fn or _default_parameter_extractor
+
+        for seg in segments:
+            start_frame = int(seg.start_frame)
+            end_frame = int(seg.end_frame)
+            if expansion:
+                start_frame = max(min_frame, start_frame - expansion)
+                end_frame = min(max_frame, end_frame + expansion)
             window = track[(track["frame"] >= start_frame) & (track["frame"] <= end_frame)]
-            params = {
-                "duration_s": (end_frame - start_frame + 1) / self.frame_rate,
-                "max_abs_y_velocity": float(window["yVelocity"].abs().max()),
-                "speed_mean": float(window["xVelocity"].mean()),
-            }
+            params = parameter_fn(window, self.frame_rate)
             events.append(
                 ScenarioEvent(
-                    scenario=scenario_name,
+                    scenario=pattern.name,
                     track_id=track_id,
                     start_frame=start_frame,
                     end_frame=end_frame,
                     parameters=params,
                 )
             )
-        return events
 
-    def _detect_slow_traffic(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
-        mask = (
-            (track["precedingId"] > 0)
-            & (track["xVelocity"] <= self.slow_speed_threshold)
-            & (track["thw"].fillna(np.inf) <= 2.0)
-        )
-        min_length = int(self.frame_rate * 3)
-        segments = find_boolean_segments(track["frame"].tolist(), mask.tolist(), min_length)
-        events: List[ScenarioEvent] = []
-        for seg in segments:
-            window = track[(track["frame"] >= seg.start_frame) & (track["frame"] <= seg.end_frame)]
-            params = {
-                "mean_speed": float(window["xVelocity"].mean()),
-                "mean_thw": float(window["thw"].mean()),
-                "duration_s": seg.length / self.frame_rate,
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario="slow_traffic",
-                    track_id=track_id,
-                    start_frame=int(seg.start_frame),
-                    end_frame=int(seg.end_frame),
-                    parameters=params,
-                )
-            )
-        return events
-
-    def _detect_stationary_lead(self, track_id: int, track: pd.DataFrame) -> List[ScenarioEvent]:
-        mask = (
-            (track["precedingId"] > 0)
-            & (track["preceding_xVelocity"].fillna(np.inf) <= self.stationary_lead_speed)
-            & (track["ttc"].fillna(np.inf) <= 4.0)
-        )
-        min_length = max(1, int(self.frame_rate * 0.6))
-        segments = find_boolean_segments(track["frame"].tolist(), mask.tolist(), min_length)
-        events: List[ScenarioEvent] = []
-        for seg in segments:
-            window = track[(track["frame"] >= seg.start_frame) & (track["frame"] <= seg.end_frame)]
-            params = {
-                "min_ttc": float(window["ttc"].min()),
-                "lead_speed": float(window["preceding_xVelocity"].mean()),
-                "duration_s": seg.length / self.frame_rate,
-            }
-            events.append(
-                ScenarioEvent(
-                    scenario="stationary_lead",
-                    track_id=track_id,
-                    start_frame=int(seg.start_frame),
-                    end_frame=int(seg.end_frame),
-                    parameters=params,
-                )
-            )
         return events

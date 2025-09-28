@@ -104,15 +104,18 @@ ERWIN_SCENARIOS: Dict[str, ErwinScenario] = {
 
 SCENARIO_TO_ERWIN: Dict[str, str] = {
     "car_following": "follow_vehicle_cruise",
+    "car_following_close": "follow_vehicle_cruise",
     "slow_traffic": "approach_low_speed_vehicle",
     "stationary_lead": "approach_low_speed_vehicle",
     "lead_vehicle_braking": "lead_vehicle_braking",
+    "approaching_lead_vehicle": "approach_low_speed_vehicle",
     "cut_in_from_left": "lead_vehicle_cut_in",
     "cut_in_from_right": "lead_vehicle_cut_in",
     "cut_out_to_left": "lead_vehicle_cut_out",
     "cut_out_to_right": "lead_vehicle_cut_out",
     "ego_lane_change_left": "ego_lane_change_with_trailing_vehicle",
     "ego_lane_change_right": "ego_lane_change_with_trailing_vehicle",
+    "ego_emergency_braking": "lead_vehicle_braking",
 }
 
 
