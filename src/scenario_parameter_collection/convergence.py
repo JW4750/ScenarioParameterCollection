@@ -260,7 +260,8 @@ class ScenarioConvergenceAnalyzer:
             aggregated_tracks.append(new_tracks)
             merged_tracks = pd.concat(aggregated_tracks, ignore_index=True, sort=False)
 
-            events = detector.detect(merged_tracks)
+            detection_result = detector.detect(merged_tracks)
+            events = detection_result.events
             stats = estimate_parameter_distributions(
                 events,
                 scenario_definitions=self.scenario_definitions,
