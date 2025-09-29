@@ -4,7 +4,6 @@ from .catalog import SCENARIO_DEFINITIONS, ScenarioDefinition
 
 from .coverage import (
     ERWIN_SCENARIOS,
-    SCENARIO_TO_ERWIN,
     ErwinCoverageSummary,
     UnmatchedEvent,
     compute_erwin_coverage,
@@ -16,7 +15,7 @@ from .convergence import (
     ScenarioConvergenceAnalyzer,
 )
 
-from .detection import DetectionResult, HighDScenarioDetector, ScenarioEvent
+from .detection import DetectionResult, HazardEvent, HighDScenarioDetector, ScenarioEvent
 from .statistics import ScenarioStatistics, estimate_parameter_distributions
 
 __all__ = [
@@ -24,9 +23,9 @@ __all__ = [
     "ScenarioDefinition",
 
     "ERWIN_SCENARIOS",
-    "SCENARIO_TO_ERWIN",
     "HighDScenarioDetector",
     "DetectionResult",
+    "HazardEvent",
     "ScenarioEvent",
     "ErwinCoverageSummary",
     "UnmatchedEvent",
