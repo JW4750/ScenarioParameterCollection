@@ -26,8 +26,6 @@ class ScenarioDefinition:
     key_parameters: List[ScenarioParameter]
     references: List[str] = field(default_factory=list)
     tag_combination: Dict[str, List[str]] = field(default_factory=dict)
-    min_duration_s: float = 1.0
-    expansion_s: float = 0.0
 
 
 SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
@@ -73,7 +71,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "required": ["tag_lead_present", "tag_approaching_lead", "tag_lane_keep"],
             "forbidden": ["tag_lead_braking"],
         },
-        min_duration_s=1.2,
     ),
     "car_following": ScenarioDefinition(
         name="car_following",
@@ -116,7 +113,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "required": ["tag_lead_present", "tag_following_medium", "tag_lane_keep"],
             "forbidden": ["tag_following_close"],
         },
-        min_duration_s=1.5,
     ),
     "car_following_close": ScenarioDefinition(
         name="car_following_close",
@@ -164,7 +160,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
         tag_combination={
             "required": ["tag_lead_present", "tag_following_close", "tag_lane_keep"],
         },
-        min_duration_s=1.6,
     ),
     "cut_in_from_left": ScenarioDefinition(
         name="cut_in_from_left",
@@ -204,8 +199,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "Real-world scenario mining tag combinations",
         ],
         tag_combination={"required": ["tag_cut_in_left"]},
-        min_duration_s=0.4,
-        expansion_s=0.4,
     ),
     "cut_in_from_right": ScenarioDefinition(
         name="cut_in_from_right",
@@ -245,8 +238,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "Real-world scenario mining tag combinations",
         ],
         tag_combination={"required": ["tag_cut_in_right"]},
-        min_duration_s=0.4,
-        expansion_s=0.4,
     ),
     "cut_out_to_left": ScenarioDefinition(
         name="cut_out_to_left",
@@ -279,8 +270,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "ISO 34502 cut-out scenario taxonomy",
         ],
         tag_combination={"required": ["tag_cut_out_left"]},
-        min_duration_s=0.4,
-        expansion_s=0.4,
     ),
     "cut_out_to_right": ScenarioDefinition(
         name="cut_out_to_right",
@@ -313,8 +302,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "ISO 34502 cut-out scenario taxonomy",
         ],
         tag_combination={"required": ["tag_cut_out_right"]},
-        min_duration_s=0.4,
-        expansion_s=0.4,
     ),
     "ego_braking": ScenarioDefinition(
         name="ego_braking",
@@ -350,7 +337,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "required": ["tag_lon_decelerating"],
             "forbidden": ["tag_lead_braking"],
         },
-        min_duration_s=0.8,
     ),
     "ego_emergency_braking": ScenarioDefinition(
         name="ego_emergency_braking",
@@ -389,7 +375,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "UNECE Automated Lane Keeping emergency braking",
         ],
         tag_combination={"required": ["tag_lon_hard_brake"]},
-        min_duration_s=0.4,
     ),
     "ego_lane_change_left": ScenarioDefinition(
         name="ego_lane_change_left",
@@ -422,8 +407,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "HighD lane-change benchmark",
         ],
         tag_combination={"required": ["tag_lane_change_left"]},
-        min_duration_s=1.0,
-        expansion_s=0.4,
     ),
     "ego_lane_change_right": ScenarioDefinition(
         name="ego_lane_change_right",
@@ -456,8 +439,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "HighD lane-change benchmark",
         ],
         tag_combination={"required": ["tag_lane_change_right"]},
-        min_duration_s=1.0,
-        expansion_s=0.4,
     ),
     "free_acceleration": ScenarioDefinition(
         name="free_acceleration",
@@ -494,7 +475,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "required": ["tag_free_flow", "tag_lon_accelerating"],
             "forbidden": ["tag_lead_present"],
         },
-        min_duration_s=1.2,
     ),
     "free_deceleration": ScenarioDefinition(
         name="free_deceleration",
@@ -530,7 +510,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "required": ["tag_free_flow", "tag_lon_decelerating"],
             "forbidden": ["tag_lead_present"],
         },
-        min_duration_s=1.2,
     ),
     "free_driving": ScenarioDefinition(
         name="free_driving",
@@ -567,7 +546,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "required": ["tag_lane_keep", "tag_free_flow", "tag_speed_high"],
             "any": ["tag_lon_cruising", "tag_lon_accelerating"],
         },
-        min_duration_s=2.0,
     ),
     "lead_vehicle_braking": ScenarioDefinition(
         name="lead_vehicle_braking",
@@ -607,7 +585,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "SOTIF examples for lead vehicle braking",
         ],
         tag_combination={"required": ["tag_lead_present", "tag_lead_braking"]},
-        min_duration_s=0.6,
     ),
     "slow_traffic": ScenarioDefinition(
         name="slow_traffic",
@@ -640,7 +617,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "Stop-and-go traffic characterisation in NGSim/HighD",
         ],
         tag_combination={"required": ["tag_lead_present", "tag_slow_speed"]},
-        min_duration_s=3.0,
     ),
     "stationary_lead": ScenarioDefinition(
         name="stationary_lead",
@@ -673,7 +649,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "AEB stationary target scenarios",
         ],
         tag_combination={"required": ["tag_lead_present", "tag_lead_stationary"]},
-        min_duration_s=0.6,
     ),
     "stop_and_go_start": ScenarioDefinition(
         name="stop_and_go_start",
@@ -706,7 +681,6 @@ SCENARIO_DEFINITIONS: Dict[str, ScenarioDefinition] = {
             "Stop-and-go comfort studies",
         ],
         tag_combination={"required": ["tag_lead_present", "tag_stop_and_go"]},
-        min_duration_s=1.0,
     ),
 }
 

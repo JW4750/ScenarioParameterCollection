@@ -8,7 +8,6 @@ from typing import Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from .catalog import SCENARIO_DEFINITIONS
 from .utils import find_boolean_segments
 
 
@@ -56,14 +55,6 @@ class DetectionResult:
         if self.total_frames == 0:
             return 0.0
         return self.covered_frames() / self.total_frames
-
-    def scenario_counts(self) -> Dict[str, int]:
-        """Return the number of occurrences per detected scenario."""
-
-        counts: Dict[str, int] = {}
-        for event in self.events:
-            counts[event.scenario] = counts.get(event.scenario, 0) + 1
-        return counts
 
 
 def _default_parameter_extractor(window: pd.DataFrame, frame_rate: float) -> Dict[str, float]:
@@ -372,27 +363,128 @@ class HighDScenarioDetector:
         return events
 
     def _scenario_patterns(self) -> Sequence[ScenarioPattern]:
-        patterns: List[ScenarioPattern] = []
-        for definition in SCENARIO_DEFINITIONS.values():
-            if not definition.tag_combination:
-                continue
-            combo = definition.tag_combination
-            required = tuple(combo.get("required", ()))
-            any_tags = tuple(combo.get("any", ()))
-            forbidden = tuple(combo.get("forbidden", ()))
-            parameter_fn = PARAMETER_FUNCTIONS.get(definition.name)
-            patterns.append(
-                ScenarioPattern(
-                    name=definition.name,
-                    required_tags=required,
-                    any_tags=any_tags,
-                    forbidden_tags=forbidden,
-                    min_duration_s=definition.min_duration_s,
-                    expansion_s=definition.expansion_s,
-                    parameter_fn=parameter_fn,
-                )
-            )
-        return patterns
+        return (
+            ScenarioPattern(
+                name="free_driving",
+                required_tags=("tag_lane_keep", "tag_free_flow", "tag_speed_high"),
+                any_tags=("tag_lon_cruising", "tag_lon_accelerating"),
+                min_duration_s=2.0,
+                parameter_fn=PARAMETER_FUNCTIONS["free_driving"],
+            ),
+            ScenarioPattern(
+                name="free_acceleration",
+                required_tags=("tag_free_flow", "tag_lon_accelerating"),
+                forbidden_tags=("tag_lead_present",),
+                min_duration_s=1.2,
+                parameter_fn=PARAMETER_FUNCTIONS["free_acceleration"],
+            ),
+            ScenarioPattern(
+                name="free_deceleration",
+                required_tags=("tag_free_flow", "tag_lon_decelerating"),
+                forbidden_tags=("tag_lead_present",),
+                min_duration_s=1.2,
+                parameter_fn=PARAMETER_FUNCTIONS["free_deceleration"],
+            ),
+            ScenarioPattern(
+                name="car_following",
+                required_tags=("tag_lead_present", "tag_following_medium", "tag_lane_keep"),
+                forbidden_tags=("tag_following_close",),
+                min_duration_s=1.5,
+                parameter_fn=PARAMETER_FUNCTIONS["car_following"],
+            ),
+            ScenarioPattern(
+                name="car_following_close",
+                required_tags=("tag_lead_present", "tag_following_close", "tag_lane_keep"),
+                min_duration_s=1.6,
+                parameter_fn=PARAMETER_FUNCTIONS["car_following_close"],
+            ),
+            ScenarioPattern(
+                name="approaching_lead_vehicle",
+                required_tags=("tag_lead_present", "tag_approaching_lead", "tag_lane_keep"),
+                forbidden_tags=("tag_lead_braking",),
+                min_duration_s=1.2,
+                parameter_fn=PARAMETER_FUNCTIONS["approaching_lead_vehicle"],
+            ),
+            ScenarioPattern(
+                name="lead_vehicle_braking",
+                required_tags=("tag_lead_present", "tag_lead_braking"),
+                min_duration_s=0.6,
+                parameter_fn=PARAMETER_FUNCTIONS["lead_vehicle_braking"],
+            ),
+            ScenarioPattern(
+                name="ego_braking",
+                required_tags=("tag_lon_decelerating",),
+                forbidden_tags=("tag_lead_braking",),
+                min_duration_s=0.8,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_braking"],
+            ),
+            ScenarioPattern(
+                name="ego_emergency_braking",
+                required_tags=("tag_lon_hard_brake",),
+                min_duration_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_emergency_braking"],
+            ),
+            ScenarioPattern(
+                name="cut_in_from_left",
+                required_tags=("tag_cut_in_left",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_in_from_left"],
+            ),
+            ScenarioPattern(
+                name="cut_in_from_right",
+                required_tags=("tag_cut_in_right",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_in_from_right"],
+            ),
+            ScenarioPattern(
+                name="cut_out_to_left",
+                required_tags=("tag_cut_out_left",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_out_to_left"],
+            ),
+            ScenarioPattern(
+                name="cut_out_to_right",
+                required_tags=("tag_cut_out_right",),
+                min_duration_s=0.4,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["cut_out_to_right"],
+            ),
+            ScenarioPattern(
+                name="ego_lane_change_left",
+                required_tags=("tag_lane_change_left",),
+                min_duration_s=1.0,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_lane_change_left"],
+            ),
+            ScenarioPattern(
+                name="ego_lane_change_right",
+                required_tags=("tag_lane_change_right",),
+                min_duration_s=1.0,
+                expansion_s=0.4,
+                parameter_fn=PARAMETER_FUNCTIONS["ego_lane_change_right"],
+            ),
+            ScenarioPattern(
+                name="slow_traffic",
+                required_tags=("tag_lead_present", "tag_slow_speed"),
+                min_duration_s=3.0,
+                parameter_fn=PARAMETER_FUNCTIONS["slow_traffic"],
+            ),
+            ScenarioPattern(
+                name="stationary_lead",
+                required_tags=("tag_lead_present", "tag_lead_stationary"),
+                min_duration_s=0.6,
+                parameter_fn=PARAMETER_FUNCTIONS["stationary_lead"],
+            ),
+            ScenarioPattern(
+                name="stop_and_go_start",
+                required_tags=("tag_lead_present", "tag_stop_and_go"),
+                min_duration_s=1.0,
+                parameter_fn=PARAMETER_FUNCTIONS["stop_and_go_start"],
+            ),
+        )
 
     # ------------------------------------------------------------------
     # tag computation and pattern matching
