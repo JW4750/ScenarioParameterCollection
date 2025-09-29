@@ -11,9 +11,9 @@
 
 ## 功能特性
 
-- 直接识别 Erwin de Gelder 提出的 10 类高速公路场景，使用标签组合匹配方法确保与文献定义一一对应。
-- 自动补充前车的速度与加速度信息，在识别常规场景的同时额外筛查 TTC/THW/DHW 低于阈值的危险场景，并区分未知的危险场景。
-- 统计每类场景的发生频率以及关键参数的概率密度函数（Gaussian KDE），并输出未知危险场景的里程发生率。
+- 支持识别 18 类高速公路场景：自由巡航、自由加速/减速、稳定/紧跟车、接近慢车、前车/自车制动（含紧急制动）、切入/切出、变道、拥堵起步、接近静止目标等。
+- 自动补充前车的速度与加速度信息，并采用“标签组合匹配”的两步场景挖掘方法（先按纵向/横向动作打标签，再顺序匹配标签组合）。
+- 统计每类场景的发生频率以及关键参数的概率密度函数（Gaussian KDE）。
 
 - 支持计算逐步引入 HighD 录制片段时的 MISE、对称 KL 散度、Hellinger 距离，评估何时达到稳定分布。
 
@@ -47,9 +47,6 @@ python -m scenario_parameter_collection.cli --tracks data/ --output-dir outputs
 - `outputs/unmapped_events.csv`：未能映射到 Erwin 场景的事件明细（场景名称、时间、车道 ID 等）。
 - `outputs/unmatched_frames.csv`：未被任何场景覆盖的帧列表（记录 trackId 与 frame）。
 - `outputs/frame_coverage_summary.json`：帧级覆盖率统计（总帧数、未覆盖帧数、覆盖比例）。
-- `outputs/hazard_events.csv`：所有危险场景事件的帧范围、触发原因及最小 TTC/THW/DHW。
-- `outputs/unknown_hazard_events.csv`：不属于十个 Erwin 场景的危险事件明细。
-- `outputs/unknown_hazard_frames.csv`：未知危险事件涉及的帧及关键指标，便于回放定位。
 
 3. **生成可视化报告**：
 
@@ -91,7 +88,7 @@ print(result.coverage_ratio())
 print(stats.counts)
 ```
 
-更多场景定义及参数说明见 `docs/scenario_catalog.md`；Erwin de Gelder 场景覆盖映射与调研见 `docs/erwin_scenario_mapping.md`；危险场景阈值与识别策略详见 `docs/hazard_detection.md`；收敛评价文献综述与阈值依据见 `docs/convergence_methodology.md`。
+更多场景定义及参数说明见 `docs/scenario_catalog.md`；Erwin de Gelder 场景覆盖映射与调研见 `docs/erwin_scenario_mapping.md`；收敛评价文献综述与阈值依据见 `docs/convergence_methodology.md`。
 
 
 ## 测试

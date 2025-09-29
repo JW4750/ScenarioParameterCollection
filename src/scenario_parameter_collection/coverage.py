@@ -102,6 +102,23 @@ ERWIN_SCENARIOS: Dict[str, ErwinScenario] = {
 }
 
 
+SCENARIO_TO_ERWIN: Dict[str, str] = {
+    "car_following": "follow_vehicle_cruise",
+    "car_following_close": "follow_vehicle_cruise",
+    "slow_traffic": "approach_low_speed_vehicle",
+    "stationary_lead": "approach_low_speed_vehicle",
+    "lead_vehicle_braking": "lead_vehicle_braking",
+    "approaching_lead_vehicle": "approach_low_speed_vehicle",
+    "cut_in_from_left": "lead_vehicle_cut_in",
+    "cut_in_from_right": "lead_vehicle_cut_in",
+    "cut_out_to_left": "lead_vehicle_cut_out",
+    "cut_out_to_right": "lead_vehicle_cut_out",
+    "ego_lane_change_left": "ego_lane_change_with_trailing_vehicle",
+    "ego_lane_change_right": "ego_lane_change_with_trailing_vehicle",
+    "ego_emergency_braking": "lead_vehicle_braking",
+}
+
+
 @dataclass(frozen=True)
 class UnmatchedEvent:
     """Scenario event that cannot be mapped to the Erwin catalogue."""
@@ -146,7 +163,8 @@ def compute_erwin_coverage(
 
     for event in events:
         total_events += 1
-        if event.scenario not in ERWIN_SCENARIOS:
+        erwin_name = SCENARIO_TO_ERWIN.get(event.scenario)
+        if erwin_name is None:
             start_time_s = event.start_frame / frame_rate
             end_time_s = event.end_frame / frame_rate
             unmatched_events.append(
@@ -161,7 +179,7 @@ def compute_erwin_coverage(
             )
             continue
         mapped_events += 1
-        matched_counts[event.scenario] = matched_counts.get(event.scenario, 0) + 1
+        matched_counts[erwin_name] = matched_counts.get(erwin_name, 0) + 1
 
     return ErwinCoverageSummary(
         total_events=total_events,
