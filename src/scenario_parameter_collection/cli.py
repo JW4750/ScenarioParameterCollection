@@ -69,6 +69,9 @@ def write_outputs(
     unmatched_path = output_dir / "unmapped_events.csv"
     unmatched_frames_path = output_dir / "unmatched_frames.csv"
     frame_coverage_path = output_dir / "frame_coverage_summary.json"
+    hazard_events_path = output_dir / "hazard_events.csv"
+    unknown_hazards_path = output_dir / "unknown_hazard_events.csv"
+    unknown_hazard_frames_path = output_dir / "unknown_hazard_frames.csv"
 
     stats.events.to_csv(events_path, index=False)
     counts_df = pd.DataFrame(
@@ -123,10 +126,54 @@ def write_outputs(
     ).to_csv(unmatched_path, index=False)
 
     detection_result.unmatched_frames.to_csv(unmatched_frames_path, index=False)
+
+    hazard_rows = []
+    for hazard in detection_result.hazard_events:
+        row = {
+            "track_id": hazard.track_id,
+            "start_frame": hazard.start_frame,
+            "end_frame": hazard.end_frame,
+            "reasons": ",".join(hazard.reasons),
+        }
+        row.update(hazard.metrics)
+        for key in ("min_ttc", "min_thw", "min_dhw", "mean_relative_speed"):
+            row.setdefault(key, float("nan"))
+        hazard_rows.append(row)
+
+    hazard_columns = [
+        "track_id",
+        "start_frame",
+        "end_frame",
+        "reasons",
+        "min_ttc",
+        "min_thw",
+        "min_dhw",
+        "mean_relative_speed",
+    ]
+
+    pd.DataFrame(hazard_rows, columns=hazard_columns).to_csv(hazard_events_path, index=False)
+    unknown_rows = []
+    for hazard in detection_result.unknown_hazard_events:
+        row = {
+            "track_id": hazard.track_id,
+            "start_frame": hazard.start_frame,
+            "end_frame": hazard.end_frame,
+            "reasons": ",".join(hazard.reasons),
+        }
+        row.update(hazard.metrics)
+        for key in ("min_ttc", "min_thw", "min_dhw", "mean_relative_speed"):
+            row.setdefault(key, float("nan"))
+        unknown_rows.append(row)
+
+    pd.DataFrame(unknown_rows, columns=hazard_columns).to_csv(unknown_hazards_path, index=False)
+    detection_result.unknown_hazard_frames.to_csv(unknown_hazard_frames_path, index=False)
     coverage_payload = {
         "total_frames": detection_result.total_frames,
         "unmatched_frames": int(len(detection_result.unmatched_frames)),
         "coverage_ratio": detection_result.coverage_ratio(),
+        "hazard_events": len(detection_result.hazard_events),
+        "unknown_hazard_events": len(detection_result.unknown_hazard_events),
+        "kilometers_per_unknown_hazard": detection_result.kilometers_per_unknown_hazard(),
     }
     with frame_coverage_path.open("w", encoding="utf-8") as fp:
         json.dump(coverage_payload, fp, indent=2, ensure_ascii=False)
@@ -179,6 +226,19 @@ def main(argv: Iterable[str] | None = None) -> None:
         f"{total_frames - unmatched_count}/{total_frames} "
         f"({coverage_ratio:.1%})"
     )
+
+    if detection_result.hazard_events:
+        print(
+            "Hazardous situations detected: "
+            f"{len(detection_result.hazard_events)} total / "
+            f"{len(detection_result.unknown_hazard_events)} unknown"
+        )
+        km_between = detection_result.kilometers_per_unknown_hazard()
+        if km_between is not None:
+            print(
+                "Average kilometres between unknown hazards: "
+                f"{km_between:.3f} km"
+            )
 
     output_dir = Path(args.output_dir)
     write_outputs(output_dir, stats, coverage, detection_result)
