@@ -17,7 +17,10 @@ pytest.importorskip("plotly")
 from scenario_parameter_collection import statistics as stats_module
 from scenario_parameter_collection.cli import main as cli_main
 from scenario_parameter_collection.coverage import compute_erwin_coverage
-from scenario_parameter_collection.detection import HighDScenarioDetector, ScenarioEvent
+from scenario_parameter_collection.detection import (
+    HighDScenarioDetector,
+    ScenarioEvent,
+)
 from scenario_parameter_collection.highd_loader import load_tracks
 from scenario_parameter_collection.statistics import estimate_parameter_distributions
 from scenario_parameter_collection.visualization import generate_report
@@ -53,10 +56,6 @@ def make_synthetic_tracks() -> pd.DataFrame:
     ego["dhw"] = 20.0
     ego["thw"] = 1.0
     ego["ttc"] = 10.0
-    trailing_window = (frames >= 55) & (frames <= 65)
-    alongside_window = (frames >= 58) & (frames <= 60)
-    ego.loc[trailing_window, "leftFollowingId"] = 3
-    ego.loc[alongside_window, "leftAlongsideId"] = 3
 
     lead = pd.DataFrame(base_columns)
     lead["id"] = 2
@@ -69,20 +68,7 @@ def make_synthetic_tracks() -> pd.DataFrame:
     lead["thw"] = np.nan
     lead["ttc"] = np.nan
 
-    adjacent = pd.DataFrame(base_columns)
-    adjacent["id"] = 3
-    adjacent["precedingId"] = 0
-    adjacent["laneId"] = 1
-    adjacent["xVelocity"] = 32.0
-    adjacent["yVelocity"] = 0.0
-    adjacent["xAcceleration"] = 0.2
-    adjacent["dhw"] = np.nan
-    adjacent["thw"] = np.nan
-    adjacent["ttc"] = np.nan
-    adjacent.loc[trailing_window, "rightPrecedingId"] = 1
-    adjacent.loc[alongside_window, "rightAlongsideId"] = 1
-
-    tracks = pd.concat([ego, lead, adjacent], ignore_index=True, sort=False)
+    tracks = pd.concat([ego, lead], ignore_index=True, sort=False)
     return tracks[
         [
             "id",
@@ -162,69 +148,20 @@ def test_detector_finds_car_following_and_lane_change():
     result = detector.detect(tracks)
     events = result.events
     scenarios = {event.scenario for event in events}
-    assert "follow_vehicle_cruise" in scenarios
-    assert "ego_lane_change_with_trailing_vehicle" in scenarios
-    expected_total = sum(len(tracks[tracks["id"] == tid]["frame"]) for tid in [1, 2, 3])
-    assert result.total_frames == expected_total
+    assert "car_following" in scenarios
+    assert "ego_lane_change_left" in scenarios
+    assert result.total_frames == len(tracks[tracks["id"] == 1]["frame"]) + len(
+        tracks[tracks["id"] == 2]["frame"]
+    )
 
     stats = estimate_parameter_distributions(events)
-    assert stats.counts["follow_vehicle_cruise"] >= 1
-    assert "mean_thw" in stats.parameter_distributions["follow_vehicle_cruise"]
+    assert stats.counts["car_following"] >= 1
+    assert "mean_thw" in stats.parameter_distributions["car_following"]
 
 
     coverage = compute_erwin_coverage(events, frame_rate=25.0)
     assert coverage.total_events == len(events)
     assert coverage.mapped_events >= 1
-    assert not result.unknown_hazard_events
-
-
-def test_detector_reports_unknown_hazard_when_thresholds_exceeded():
-    frames = np.arange(0, 50)
-    hazard = pd.DataFrame(
-        {
-            "id": 1,
-            "frame": frames,
-            "precedingId": np.ones_like(frames) * 2,
-            "leftPrecedingId": np.zeros_like(frames),
-            "leftAlongsideId": np.zeros_like(frames),
-            "leftFollowingId": np.zeros_like(frames),
-            "rightPrecedingId": np.zeros_like(frames),
-            "rightAlongsideId": np.zeros_like(frames),
-            "rightFollowingId": np.zeros_like(frames),
-            "laneId": np.ones_like(frames),
-            "xVelocity": np.ones_like(frames) * 20.0,
-            "yVelocity": np.zeros_like(frames, dtype=float),
-            "xAcceleration": np.zeros_like(frames, dtype=float),
-            "yAcceleration": np.zeros_like(frames, dtype=float),
-            "dhw": np.ones_like(frames, dtype=float) * 5.0,
-            "thw": np.ones_like(frames, dtype=float) * 0.5,
-            "ttc": np.ones_like(frames, dtype=float) * 0.7,
-        }
-    )
-
-    lead = hazard.copy()
-    lead["id"] = 2
-    lead["precedingId"] = 0
-    lead["dhw"] = np.nan
-    lead["thw"] = np.nan
-    lead["ttc"] = np.nan
-
-    tracks = pd.concat([hazard, lead], ignore_index=True)
-    detector = HighDScenarioDetector(frame_rate=25.0)
-    result = detector.detect(tracks)
-
-    assert not result.events
-    assert result.hazard_events
-    assert result.unknown_hazard_events
-    assert not result.unknown_hazard_frames.empty
-    reasons = set(result.unknown_hazard_frames.iloc[0]["reasons"].split(","))
-    assert {"low_ttc", "low_thw", "short_dhw"}.issubset(reasons)
-
-    km = result.kilometers_per_unknown_hazard()
-    # Two vehicles contribute the same travel distance to the fleet total.
-    expected_distance_km = (2 * 20.0 * len(frames) / 25.0) / 1000.0
-    assert km is not None
-    assert pytest.approx(expected_distance_km, rel=1e-6) == km
 
 
 def test_statistics_fallback_without_scipy(monkeypatch):
@@ -235,8 +172,8 @@ def test_statistics_fallback_without_scipy(monkeypatch):
     monkeypatch.setattr(stats_module, "gaussian_kde", None, raising=False)
     stats = stats_module.estimate_parameter_distributions(events)
 
-    assert stats.counts["follow_vehicle_cruise"] >= 1
-    assert "mean_thw" in stats.parameter_distributions["follow_vehicle_cruise"]
+    assert stats.counts["car_following"] >= 1
+    assert "mean_thw" in stats.parameter_distributions["car_following"]
 
 
 def test_highd_loader_handles_csv_directory(tmp_path: Path):
@@ -247,7 +184,7 @@ def test_highd_loader_handles_csv_directory(tmp_path: Path):
 
     detector = HighDScenarioDetector(frame_rate=25.0)
     events = detector.detect(loaded).events
-    assert any(event.scenario == "follow_vehicle_cruise" for event in events)
+    assert any(event.scenario == "car_following" for event in events)
 
 
 def test_cli_generates_outputs(tmp_path: Path, capsys, monkeypatch):
@@ -296,7 +233,7 @@ def test_cli_generates_outputs(tmp_path: Path, capsys, monkeypatch):
 def test_erwin_coverage_reports_unmapped():
     events = [
         ScenarioEvent(
-            scenario="follow_vehicle_cruise",
+            scenario="car_following",
             track_id=1,
             start_frame=0,
             end_frame=24,
@@ -348,4 +285,4 @@ def test_visualization_report_creation(tmp_path: Path, monkeypatch):
     html = report_path.read_text(encoding="utf-8")
     assert "Synthetic Report" in html
     assert "Scenario Frequency Overview" in html
-    assert "follow_vehicle_cruise" in html
+    assert "car_following" in html

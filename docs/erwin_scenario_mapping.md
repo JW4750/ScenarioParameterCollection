@@ -24,29 +24,29 @@
 | F9 | 主车超车 (ego_overtaking) | Ego 超越慢车 | 初始间距、完成间距、超车时长 |
 | F10 | 主车被超车 (ego_overtaken_by_vehicle) | 环境车从旁超车 | 超车车辆速度、横向间距、事件时长 |
 
-## 3. 基于标签组合的 Erwin 场景识别
+## 3. HighD 检测结果到 Erwin 场景的映射
 
-新版 HighD 场景识别模块直接以 Erwin de Gelder 的 10 个高速公路场景为目标类别，将文献中的纵横向动作转化为标签组合。每个场景均由“必需标签 / 可选标签 / 排除标签”定义，在时间轴上顺序匹配即可批量提取事件。
-
-| Erwin 场景 | 标签组合（必需 / 可选 / 排除） | 说明 |
+| HighD 检测场景 | 描述 | 映射的 Erwin 场景 |
 | --- | --- | --- |
-| **F1 跟随前车巡航** (`follow_vehicle_cruise`) | 必需：`tag_lead_present`、`tag_lane_keep`、`tag_lon_cruising`、`tag_following_medium`；排除：`tag_following_close`、`tag_lead_braking` | 同车道稳定跟驰，保持舒适头距与小相对速度。 |
-| **F2 前车制动** (`lead_vehicle_braking`) | 必需：`tag_lead_present`、`tag_lead_braking` | 前车急减速触发 AEB 风险评估。 |
-| **F3 前车加速** (`lead_vehicle_accelerating`) | 必需：`tag_lead_present`、`tag_lead_accelerating`；排除：`tag_lead_braking` | 前车加速拉开车距，考察 ACC 稳态性能。 |
-| **F4 接近低速车辆** (`approach_low_speed_vehicle`) | 必需：`tag_lead_present`、`tag_lane_keep`；可选：`tag_lead_stationary`、`tag_approaching_lead`、`tag_slow_speed`；排除：`tag_lead_braking` | Ego 接近慢车或静止目标的风险场景。 |
-| **F5 前车切入** (`lead_vehicle_cut_in`) | 必需：`tag_lead_present`；可选：`tag_cut_in_left` 或 `tag_cut_in_right` | 邻道车辆插入本车道并成为新前车。 |
-| **F6 前车切出** (`lead_vehicle_cut_out`) | 可选：`tag_cut_out_left` 或 `tag_cut_out_right` | 原前车驶离本车道，暴露新的前向目标。 |
-| **F7 主车换道（目标车道后方有车）** (`ego_lane_change_with_trailing_vehicle`) | 可选：`tag_lane_change_left_trailing` 或 `tag_lane_change_right_trailing` | Ego 变道时目标车道存在后车，考察横向安全裕度。 |
-| **F8 主车汇入** (`ego_merge_with_trailing_vehicle`) | 可选：`tag_merge_left` 或 `tag_merge_right` | Ego 自匝道或路肩并入主线，同时目标车道有跟随车辆。 |
-| **F9 主车超车** (`ego_overtaking`) | 必需：`tag_overtaking` | Ego 通过一进一出两次变道完成超车。 |
-| **F10 主车被超车** (`ego_overtaken_by_vehicle`) | 必需：`tag_overtaken` | 邻道车辆从后向前通过，Ego 保持原车道。 |
+| `car_following` | 稳定跟驰（THW 0.7–3 s，相对速度小） | F1 跟随前车巡航 |
+| `slow_traffic` | 拥堵状态下的近距离跟车 | F4 接近低速车辆 |
+| `stationary_lead` | 前车近似静止或极慢 | F4 接近低速车辆 |
+| `lead_vehicle_braking` | 前车急减速 | F2 前车制动 |
+| `cut_in_from_left/right` | 左/右侧插入本车道 | F5 前车切入 |
+| `cut_out_to_left/right` | 前车离开本车道 | F6 前车切出 |
+| `ego_lane_change_left/right` | Ego 车向左/右换道 | F7 主车换道（目标车道后方有车） |
+
+**当前未覆盖的 HighD 场景**：`free_driving`、`ego_braking` 等不属于 Erwin 十大类，会在输出的 `unmapped_events.csv` 中记录其发生时间，便于后续扩充标准场景库。
+
+**Erwin 场景的空缺**：由于 HighD 规则检测暂未实现前车加速（F3）、主车汇入（F8）、主车超车（F9）、主车被超车（F10）等事件识别，因此这些类别在 `erwin_coverage.csv` 中可能为 0。需要结合相邻车道速度与相对运动进一步扩展检测逻辑。
 
 ## 4. 覆盖率计算
 
-检测输出的 `ScenarioEvent` 已直接使用 Erwin 场景名称，因此覆盖率计算只需对事件列表按场景汇总，并统计未命中任何场景标签的帧：
+1. 对每个检测到的 `ScenarioEvent`，根据上表映射到对应的 Erwin 场景；如果没有映射即标记为未覆盖事件。
+2. 统计 Erwin 每个场景的事件数，并计算覆盖率：`覆盖率 = 已映射事件数 / 总事件数`。
+3. 输出三个文件：
+   - `erwin_coverage.csv`：每个 Erwin 场景的事件数及描述；
+   - `erwin_coverage_summary.json`：总事件数、已映射事件数、覆盖率、未映射事件数；
+   - `unmapped_events.csv`：未覆盖的场景名称、轨迹 ID、起止帧及换算成秒的发生时间。
 
-1. 汇总每个 Erwin 场景的事件数，写入 `erwin_coverage.csv`。
-2. 统计总事件数、已识别事件数及覆盖率，写入 `erwin_coverage_summary.json`。
-3. 对未匹配到任何标签组合的帧，输出 `unmatched_frames.csv` 以记录轨迹 ID、帧号及换算时间，为补充场景库提供依据。
-
-该流程沿用了《Real-World Scenario Mining for the Assessment of Automated Vehicles》的两步法，直接以标签组合生成场景实例，减少了中间映射环节并覆盖 Erwin 十大功能场景。
+该流程遵循 Erwin de Gelder 提出的场景覆盖度量方法，可用于评估自然驾驶数据对标准场景库的支持程度，并指引后续检测器的扩展方向。
